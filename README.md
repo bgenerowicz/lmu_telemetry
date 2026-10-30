@@ -63,11 +63,11 @@ server that allows sign-in without Steam:
 LMU_DEV_LOGIN=1 python -m server --port 8000
 ```
 
-then start the app signed in as a made-up user, and enter
-`http://127.0.0.1:8000` as the server address:
+then start the app pointed at it (instead of the public server), signed in as
+a made-up user:
 
 ```bash
-LMU_DEV_LOGIN_NAME=Alice python -m desktop
+LMU_SERVER_URL=http://127.0.0.1:8000 LMU_DEV_LOGIN_NAME=Alice python -m desktop
 ```
 
 ## How it fits together

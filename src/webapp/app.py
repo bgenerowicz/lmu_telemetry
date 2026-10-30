@@ -133,14 +133,11 @@ def create_app(
             html.Section(className="panel server", children=[
                 html.Div("Online leaderboard", className="step-title"),
                 html.Div(className="row", children=[
-                    dcc.Input(id="server-url", value=settings.get("server_url", ""),
-                              debounce=True, placeholder="https://lmu.example.com",
-                              className="grow"),
+                    html.Div(id="server-status", className="muted grow-text"),
                     html.A("Sign in with Steam", id="sign-in", href="/server-login",
                            className="btn"),
                     html.Button("Sign out", id="sign-out", className="btn"),
                 ]),
-                html.Div(id="server-status", className="muted mt"),
                 # Anyone can see the leaderboard; signing in is only for uploading.
                 html.Div(id="board-note", className="mt"),
                 html.Div(id="board-wrap", className="mt", children=[
@@ -422,16 +419,12 @@ def create_app(
     @app.callback(
         Output("server-status", "children"), Output("sign-in", "style"),
         Output("sign-out", "style"),
-        Input("server-url", "value"), Input("server-version", "data"),
+        Input("server-version", "data"),
     )
-    def server_status(url, _):
-        url = (url or "").strip().rstrip("/")
-        if url != settings.get("server_url", ""):
-            # A different server: the old sign-in doesn't apply.
-            remember(server_url=url, server_token=None, server_name=None)
+    def server_status(_):
         hide, show = {"display": "none"}, {}
-        if not url:
-            return "Add the leaderboard server's address to upload laps and compare with them.", hide, hide
+        if not server():
+            return "No leaderboard server set up.", hide, hide
         try:
             health = server().health()
         except ServerError as exc:
@@ -447,11 +440,9 @@ def create_app(
 
     @app.callback(
         Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),
-        Input("track", "value"), Input("car", "value"),
-        # After server_status, which takes up a changed server address.
-        Input("server-status", "children"), Input("server-version", "data"),
+        Input("track", "value"), Input("car", "value"), Input("server-version", "data"),
     )
-    def board(track, car, _, __):
+    def board(track, car, _):
         hide = {"display": "none"}
         if not server() or not track or not car:
             return [], hide, ""
@@ -490,7 +481,7 @@ def create_app(
         if not rows or not selected:
             return html.P("Select one of your laps first.", className="muted"), no_update
         if not server():
-            return html.P("Add the leaderboard server's address first.", className="muted"), no_update
+            return html.P("No leaderboard server set up.", className="muted"), no_update
         row = rows[selected[0]]
         try:
             result = server().upload_lap(row["path"], row["lap"])

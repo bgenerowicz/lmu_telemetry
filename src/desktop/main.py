@@ -4,7 +4,7 @@
     lmu-analyser.exe --port 8050     fixed port instead of a free one
     lmu-analyser.exe --no-browser    don't open the browser
 
-The telemetry folder, server address and sign-in are remembered in
+The telemetry folder and sign-in are remembered in
 Documents/LMU Lap Analyser/settings.json.
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import socket
 import sys
 import threading
@@ -29,7 +30,12 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = paths.load_settings()
     folder = settings.get("telemetry_dir") or str(paths.find_telemetry_dir() or "")
-    settings.setdefault("server_url", paths.DEFAULT_SERVER_URL)
+    # The leaderboard server is fixed; LMU_SERVER_URL points the app at another
+    # one (e.g. a local server for testing).
+    server_url = os.environ.get("LMU_SERVER_URL", paths.DEFAULT_SERVER_URL).rstrip("/")
+    if settings.get("server_url") != server_url:
+        # A sign-in only applies to the server it was made with.
+        settings.update(server_url=server_url, server_token=None, server_name=None)
 
     app = create_app(
         reference_dirs=[paths.bundled_references_dir()],
