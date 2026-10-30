@@ -173,6 +173,7 @@ def create_app(
                             {"name": "Car", "id": "car"},
                             {"name": "Time", "id": "time"},
                             {"name": "Gap", "id": "gap"},
+                            {"name": "Conditions", "id": "conditions"},
                             {"name": "Recorded", "id": "recorded"},
                         ],
                         style_as_list_view=True,
@@ -510,6 +511,7 @@ def create_app(
             "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
             "time": _fmt_time(e["lap_time_s"]),
             "gap": "" if i == 0 else f"+{e['lap_time_s'] - best:.3f}",
+            "conditions": _fmt_conditions(e),
             "recorded": _fmt_recorded(e["recorded_at"]),
             "selected": int(e.get("car", car) == car),
         } for i, e in enumerate(entries)]
@@ -657,8 +659,8 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
     gains = sorted(((s, g) for s, g in gains if g >= 0.05), key=lambda x: -x[1])
 
     cards = [
-        ("Your lap", _fmt_time(lap_t), lap_label),
-        ("Reference", _fmt_time(ref_t), ref_label),
+        ("Your lap", _fmt_time(lap_t), lap_label, _fmt_conditions(vars(lap.facts))),
+        ("Reference", _fmt_time(ref_t), ref_label, _fmt_conditions(vars(ref.facts))),
         ("Gap", f"{lap_t - ref_t:+.3f} s", "positive = slower than the reference"),
     ]
     if findings:
@@ -687,8 +689,8 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         html.Div(className="cards", children=[
             html.Div(className="card", children=[
                 html.Div(k, className="label"), html.Div(v, className="value"),
-                html.Div(sub, className="muted"),
-            ]) for k, v, sub in cards
+                *(html.Div(line, className="muted") for line in sub if line),
+            ]) for k, v, *sub in cards
         ]),
         html.Div(className="row mt viz-help", children=[
             html.Span("On the map, scroll to zoom and drag to move. Drag across the traces to "
@@ -811,6 +813,22 @@ def _fmt_recorded(value: str | None) -> str:
     if not value:
         return ""
     return value.replace("T", " ").replace("_", ":")[:16]
+
+def _fmt_conditions(facts: dict) -> str:
+    """Weather, air and track temperature and fuel in one line, e.g.
+    "Clear · air 18° · track 21° · 77 L fuel"; whatever is known."""
+    def num(key: str) -> float | None:
+        value = facts.get(key)
+        return None if value is None else round(value)
+    parts = [facts.get("weather") or ""]
+    if (air := num("ambient_temp_c")) is not None:
+        parts.append(f"air {air}°")
+    if (track := num("track_temp_c")) is not None:
+        parts.append(f"track {track}°")
+    if (fuel := num("fuel_at_start_l")) is not None:
+        parts.append(f"{fuel} L fuel")
+    return " · ".join(p for p in parts if p)
+
 
 _SYNC_JS = """
 window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (function () {

@@ -344,3 +344,28 @@ def test_admin_refresh_names(tmp_path, monkeypatch):
     monkeypatch.setattr(steam, "display_name", lambda steam_id, key: "Stazzle")
     assert admin.main(["refresh-names"]) == 0
     assert client.get("/api/me", headers=alice).json()["name"] == "Stazzle"
+
+
+def test_leaderboard_shows_conditions(tmp_path, extracts):
+    import sqlite3
+
+    from server import db
+
+    client, settings = make_client(tmp_path)
+    assert upload(client, sign_in(client, "Alice"), extracts[3]).status_code == 201
+    params = {"track": "Algarve International Circuit", "car": "Garage 59 2026 #10:LM"}
+    [entry] = client.get("/api/leaderboard", params=params).json()
+    assert entry["weather"] == "Clear" and entry["session_type"] == "Practice"
+    assert entry["ambient_temp_c"] == pytest.approx(18.3, abs=0.5)
+    assert entry["track_temp_c"] == pytest.approx(20.8, abs=0.5)
+    assert entry["fuel_at_start_l"] > 0
+
+    # A database from before conditions were stored gets them from the laps' files.
+    con = sqlite3.connect(settings.data_dir / "lmu.sqlite3")
+    for column in db.CONDITION_COLUMNS:
+        con.execute(f"ALTER TABLE laps DROP COLUMN {column}")
+    con.commit()
+    con.close()
+    client, _ = make_client(tmp_path)
+    [again] = client.get("/api/leaderboard", params=params).json()
+    assert {c: again[c] for c in db.CONDITION_COLUMNS} == {c: entry[c] for c in db.CONDITION_COLUMNS}

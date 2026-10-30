@@ -64,3 +64,12 @@ def test_results_against_expert_lap(tmp_path):
     text = str(view)
     assert "Where you lose time" in text
     assert "+0.816 s" in text
+
+
+def test_conditions_in_one_line():
+    from webapp.app import _fmt_conditions
+
+    assert _fmt_conditions({"weather": "Clear", "ambient_temp_c": 18.3, "track_temp_c": 20.8,
+                            "fuel_at_start_l": 76.8}) == "Clear · air 18° · track 21° · 77 L fuel"
+    assert _fmt_conditions({"weather": None, "track_temp_c": 25.2}) == "track 25°"
+    assert _fmt_conditions({}) == ""

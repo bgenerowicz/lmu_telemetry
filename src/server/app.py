@@ -32,6 +32,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from lmu_core.recording import Recording
+from lmu_core.resample import ProcessedLap
 from lmu_core.ruleset import Ruleset
 from lmu_core.verify import verify_lap
 from server import db, steam
@@ -50,7 +51,8 @@ def create_app(
     steam_name: Callable[[str, str | None], str | None] = steam.display_name,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    db.init(settings.data_dir)
+    if db.init(settings.data_dir):
+        _fill_conditions(settings.data_dir)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
     if unstored:
@@ -173,7 +175,8 @@ def create_app(
         rows = con.execute(
             "SELECT laps.id, laps.user_id, users.name AS driver, laps.driver_name, "
             "laps.lap_time_s, laps.car, laps.car_class, laps.layout, laps.recorded_at, "
-            "laps.uploaded_at FROM laps JOIN users ON users.id = laps.user_id "
+            "laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.CONDITION_COLUMNS) +
+            " FROM laps JOIN users ON users.id = laps.user_id "
             "WHERE ruleset_id = ? AND track = ? AND (? IS NULL OR car = ?) "
             "AND (? IS NULL OR car_class = ?) AND (? IS NULL OR layout = ?) "
             "AND users.banned = 0 ORDER BY lap_time_s",
@@ -321,11 +324,16 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         raw, processed = db.lap_files(settings.data_dir, lap_id)
         raw.write_bytes(data)
         v.processed.save(processed)
-        con.execute(
-            "INSERT INTO laps VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (lap_id, user["id"], ruleset.id, f.track, f.layout, f.car, f.car_class,
-             f.lap_time_s, float(v.processed.distance_m[-1]), f.driver, f.recorded_at,
-             time.time(), fingerprint, json.dumps({"checks": checks, "rules": rules})))
+        row = {
+            "id": lap_id, "user_id": user["id"], "ruleset_id": ruleset.id, "track": f.track,
+            "layout": f.layout, "car": f.car, "car_class": f.car_class,
+            "lap_time_s": f.lap_time_s, "track_length_m": float(v.processed.distance_m[-1]),
+            "driver_name": f.driver, "recorded_at": f.recorded_at, "uploaded_at": time.time(),
+            "file_hash": fingerprint, "report_json": json.dumps({"checks": checks, "rules": rules}),
+            **{c: getattr(f, c) for c in db.CONDITION_COLUMNS},
+        }
+        con.execute(f"INSERT INTO laps ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
+                    tuple(row.values()))
         removed = [own["id"]] if own else []
         con.execute("DELETE FROM laps WHERE id IN (%s)" % ",".join("?" * len(removed)), removed)
         # Keep the top N; laps pushed out are deleted.
@@ -349,6 +357,23 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         "message": f"Accepted: #{rank} on {f.track} in the {f.car}{overall_note}.",
         "checks": checks, "rules": rules,
     }
+
+
+def _fill_conditions(data_dir: Path) -> None:
+    """Conditions for laps stored before they had columns, from their processed laps."""
+    con = db.connect(data_dir)
+    try:
+        for (lap_id,) in con.execute("SELECT id FROM laps").fetchall():
+            _, processed = db.lap_files(data_dir, lap_id)
+            try:
+                f = ProcessedLap.load(processed).facts
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            con.execute(
+                "UPDATE laps SET " + ", ".join(f"{c} = ?" for c in db.CONDITION_COLUMNS) +
+                " WHERE id = ?", (*(getattr(f, c) for c in db.CONDITION_COLUMNS), lap_id))
+    finally:
+        con.close()
 
 
 def _rule_reason(result, track_limits: str) -> str:

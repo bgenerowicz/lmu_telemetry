@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS used_nonces (
 """
 
 
+# Conditions the lap was driven in (LapFacts fields), shown next to it. Added to
+# databases made before they were stored.
+CONDITION_COLUMNS = {
+    "session_type": "TEXT", "weather": "TEXT", "ambient_temp_c": "REAL",
+    "track_temp_c": "REAL", "fuel_at_start_l": "REAL",
+}
+
+
 def connect(data_dir: Path) -> sqlite3.Connection:
     data_dir.mkdir(parents=True, exist_ok=True)
     # Each request has its own connection, but FastAPI may open and close it on
@@ -63,13 +71,19 @@ def connect(data_dir: Path) -> sqlite3.Connection:
     return con
 
 
-def init(data_dir: Path) -> None:
+def init(data_dir: Path) -> list[str]:
+    """Create or update the database; returns the columns it had to add."""
     con = connect(data_dir)
     try:
         con.executescript(SCHEMA)
+        have = {r["name"] for r in con.execute("PRAGMA table_info(laps)")}
+        added = [c for c in CONDITION_COLUMNS if c not in have]
+        for c in added:
+            con.execute(f"ALTER TABLE laps ADD COLUMN {c} {CONDITION_COLUMNS[c]}")
     finally:
         con.close()
     (data_dir / "laps").mkdir(parents=True, exist_ok=True)
+    return added
 
 
 def lap_files(data_dir: Path, lap_id: str) -> tuple[Path, Path]:
