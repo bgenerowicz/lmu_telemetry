@@ -141,6 +141,24 @@ def create_app(
                     html.Button("Sign out", id="sign-out", className="btn"),
                 ]),
                 html.Div(id="server-status", className="muted mt"),
+                # Anyone can see the leaderboard; signing in is only for uploading.
+                html.Div(id="board-note", className="mt"),
+                html.Div(id="board-wrap", className="mt", children=[
+                    dash_table.DataTable(
+                        id="board", page_size=10,
+                        columns=[
+                            {"name": "#", "id": "rank"},
+                            {"name": "Driver", "id": "driver"},
+                            {"name": "Time", "id": "time"},
+                            {"name": "Gap", "id": "gap"},
+                            {"name": "Recorded", "id": "recorded"},
+                        ],
+                        style_as_list_view=True,
+                        style_cell={"fontFamily": FONT, "fontSize": 14, "padding": "6px 10px",
+                                    "textAlign": "left"},
+                        style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
+                    ),
+                ]),
             ]),
             html.Section(className="panel two-col", children=[
                 html.Div([
@@ -426,6 +444,31 @@ def create_app(
         except ServerError as exc:
             return f"{exc} {rules}", show, hide
         return f"Signed in as {me['name']}. {rules}", hide, show
+
+    @app.callback(
+        Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),
+        Input("track", "value"), Input("car", "value"),
+        # After server_status, which takes up a changed server address.
+        Input("server-status", "children"), Input("server-version", "data"),
+    )
+    def board(track, car, _, __):
+        hide = {"display": "none"}
+        if not server() or not track or not car:
+            return [], hide, ""
+        try:
+            entries = server().leaderboard(track, car)
+        except ServerError as exc:
+            return [], hide, html.Span(f"Couldn't load the leaderboard: {exc}", className="muted")
+        if not entries:
+            return [], hide, html.Span("No laps on the leaderboard for this track and car yet.",
+                                       className="muted")
+        best = entries[0]["lap_time_s"]
+        rows = [{
+            "rank": e["rank"], "driver": e["driver"], "time": _fmt_time(e["lap_time_s"]),
+            "gap": "" if i == 0 else f"+{e['lap_time_s'] - best:.3f}",
+            "recorded": _fmt_recorded(e["recorded_at"]),
+        } for i, e in enumerate(entries)]
+        return rows, {}, html.B(f"Top laps: {track} · {car}")
 
     @app.callback(
         Output("server-version", "data", allow_duplicate=True),

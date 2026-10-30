@@ -66,6 +66,20 @@ def test_upload_compare_download(server_url, tmp_path):
     assert client.download_lap(entry["id"], tmp_path) == path  # cached
 
 
+def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
+    from webapp.app import create_app as create_webapp
+
+    ServerClient(server_url, token_for(server_url, "Alice")).upload_lap(ALGARVE, 3)
+    app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
+    [key] = [k for k in app.callback_map if "board.data" in k]
+    board = app.callback_map[key]["callback"].__wrapped__
+    rows, style, note = board("Algarve International Circuit", "Garage 59 2026 #10:LM", "", 0)
+    assert [(r["rank"], r["driver"]) for r in rows] == [(1, "Alice")]
+    assert style == {} and "Top laps" in str(note)
+    rows, style, note = board("Algarve International Circuit", "Some other car", "", 0)
+    assert rows == [] and "No laps" in str(note)
+
+
 def test_errors_are_readable(server_url):
     with pytest.raises(ServerError, match="Sign in"):
         ServerClient(server_url).upload_lap(ALGARVE, 3)
