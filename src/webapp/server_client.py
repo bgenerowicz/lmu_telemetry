@@ -54,6 +54,9 @@ class ServerClient:
     def me(self) -> dict:
         return self._get("/api/me")
 
+    def ruleset(self) -> dict:
+        return self._get("/api/ruleset")
+
     def leaderboards(self) -> list[dict]:
         return self._get("/api/leaderboards")
 

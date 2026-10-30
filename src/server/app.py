@@ -162,18 +162,25 @@ def create_app(
 
     @app.get("/api/leaderboard")
     def leaderboard(track: str, car: str | None = None, car_class: str | None = None,
-                    layout: str | None = None, con=Depends(get_con)):
-        """Laps at a track, fastest first: one car's, one class's, or all."""
+                    layout: str | None = None, con=Depends(get_con),
+                    authorization: str | None = Header(default=None)):
+        """Laps at a track, fastest first: one car's, one class's, or all. Anyone can
+        read it; for a signed-in app, ``mine`` marks the user's own laps."""
+        me = None
+        if authorization and authorization.startswith("Bearer "):
+            me = db.user_for_token(con, authorization.removeprefix("Bearer ").strip())
         rows = con.execute(
-            "SELECT laps.id, users.name AS driver, laps.driver_name, laps.lap_time_s, "
-            "laps.car, laps.car_class, laps.layout, laps.recorded_at, laps.uploaded_at "
-            "FROM laps JOIN users ON users.id = laps.user_id "
+            "SELECT laps.id, laps.user_id, users.name AS driver, laps.driver_name, "
+            "laps.lap_time_s, laps.car, laps.car_class, laps.layout, laps.recorded_at, "
+            "laps.uploaded_at FROM laps JOIN users ON users.id = laps.user_id "
             "WHERE ruleset_id = ? AND track = ? AND (? IS NULL OR car = ?) "
             "AND (? IS NULL OR car_class = ?) AND (? IS NULL OR layout = ?) "
             "AND users.banned = 0 ORDER BY lap_time_s",
             (ruleset.id, track, car, car, car_class, car_class, layout, layout),
         ).fetchall()
-        return [{"rank": i, **dict(r)} for i, r in enumerate(rows, start=1)]
+        return [{"rank": i, **{k: r[k] for k in r.keys() if k != "user_id"},
+                 "mine": me is not None and r["user_id"] == me["id"]}
+                for i, r in enumerate(rows, start=1)]
 
     @app.get("/api/laps/{lap_id}")
     def lap_info(lap_id: str, con=Depends(get_con)) -> dict:

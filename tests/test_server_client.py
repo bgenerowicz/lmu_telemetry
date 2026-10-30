@@ -97,6 +97,30 @@ def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path)
     assert labels == []
 
 
+def test_candidates_are_laps_that_would_make_the_leaderboard(server_url):
+    from lmu_core.library import scan_folder
+    from lmu_core.ruleset import Ruleset
+    from webapp.app import _info_dict
+    from webapp.candidates import find_candidates
+
+    alice = ServerClient(server_url, token_for(server_url, "Alice"))
+    alice.upload_lap(ALGARVE, 3)  # (or already there from an earlier test)
+    recordings = [_info_dict(i) for i in scan_folder(ALGARVE.parent)[0]]
+    ruleset = Ruleset.model_validate(alice.ruleset())
+
+    def entries(client):
+        return lambda track, car, car_class: client.leaderboard(track, car)
+
+    # Alice's best lap is on the board: nothing to add.
+    assert find_candidates(recordings, ruleset, entries(alice)) == []
+    # For Bob, lap 3 is already there (Alice's upload of it); lap 2 would be #2.
+    # Lap 1 is never suggested: it went off track.
+    bob = ServerClient(server_url, token_for(server_url, "Bob"))
+    [c] = find_candidates(recordings, ruleset, entries(bob))
+    assert (c.lap, c.rank) == (2, 2)
+    assert find_candidates(recordings, ruleset, entries(bob), skip={c.key}) == []
+
+
 def test_errors_are_readable(server_url):
     with pytest.raises(ServerError, match="Sign in"):
         ServerClient(server_url).upload_lap(ALGARVE, 3)

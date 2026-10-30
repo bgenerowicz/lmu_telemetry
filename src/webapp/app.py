@@ -22,6 +22,7 @@ from dash import (
     Input,
     Output,
     State,
+    ctx,
     dash_table,
     dcc,
     html,
@@ -37,6 +38,8 @@ from lmu_core.library import (
     save_reference,
     scan_folder,
 )
+from lmu_core.ruleset import Ruleset
+from webapp.candidates import find_candidates
 from webapp.charts import map_figure, traces_figure
 from webapp.server_client import ServerClient, ServerError
 
@@ -146,6 +149,19 @@ def create_app(
                            className="btn"),
                     html.Button("Sign out", id="sign-out", className="btn"),
                 ]),
+                # Laps from the telemetry folder that would make the leaderboard.
+                dcc.Loading(html.Div(id="candidates", className="mt"), type="dot"),
+                html.Div(id="candidate-actions", className="row mt wrap", children=[
+                    html.Button("Upload these laps", id="upload-candidates",
+                                className="btn primary"),
+                    dcc.Checklist(
+                        id="auto-upload", className="muted",
+                        options=[{"label": " Upload them automatically while signed in",
+                                  "value": "on"}],
+                        value=["on"] if settings.get("auto_upload", True) else [],
+                    ),
+                ]),
+                dcc.Loading(html.Div(id="candidate-status", className="mt"), type="dot"),
                 # Anyone can see the leaderboard; signing in is only for uploading.
                 html.Div(id="board-note", className="mt"),
                 html.Div(id="board-wrap", className="mt", children=[
@@ -501,6 +517,78 @@ def create_app(
             f"Top laps: {track} · {car}"
         return rows, {}, html.B(title)
 
+    # Laps the server has answered for this session (accepted or not): not retried,
+    # so a turned-down lap can't be uploaded over and over.
+    tried: set[str] = set()
+
+    @app.callback(
+        Output("candidates", "children"), Output("candidate-actions", "style"),
+        Output("candidate-status", "children"),
+        Output("server-version", "data", allow_duplicate=True),
+        Input("recordings", "data"), Input("server-version", "data"),
+        Input("upload-candidates", "n_clicks"), State("auto-upload", "value"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def candidates(recordings, version, _, auto):
+        """Find laps that would make the leaderboard and, when signed in, upload them
+        (automatically, or on the button). One callback, as a separate upload callback
+        feeding server-version back in would be a loop Dash won't run."""
+        hide = {"display": "none"}
+        if not server() or not recordings:
+            return None, hide, no_update, no_update
+        try:
+            ruleset = Ruleset.model_validate(server().ruleset())
+            found = _find(recordings, ruleset)
+        except (ServerError, ValueError) as exc:
+            return (html.Span(f"Couldn't check your laps against the leaderboard: {exc}",
+                              className="muted"), hide, no_update, no_update)
+        signed_in = bool(settings.get("server_token"))
+        status, new_version = no_update, no_update
+        if found and signed_in and (ctx.triggered_id == "upload-candidates" or auto):
+            status, accepted = _upload(found)
+            if accepted:
+                new_version = version + 1
+            found = _find(recordings, ruleset)
+        if not found:
+            return None, hide, status, new_version
+        place = " for its car" if "car" in ruleset.leaderboard_key + ruleset.top_n_per else ""
+        items = [html.Li(f"{c.track} · {c.car} · {_fmt_time(c.lap_time_s)}: "
+                         f"would be #{c.rank}{place}") for c in found]
+        intro = "Your laps that would make the leaderboard" + (
+            ":" if signed_in else " (sign in with Steam to add them):")
+        return (html.Div([html.B(intro), html.Ul(items)]), {} if signed_in else hide,
+                status, new_version)
+
+    def _find(recordings, ruleset):
+        per_car = "car" in ruleset.leaderboard_key + ruleset.top_n_per
+
+        def entries_for(track, car, car_class):
+            if per_car or not car_class:
+                return server().leaderboard(track, car)
+            return server().class_leaderboard(track, car_class)
+
+        return find_candidates(recordings, ruleset, entries_for, skip=tried)
+
+    def _upload(found):
+        results, accepted = [], False
+        for c in found:
+            label = f"{c.track} · {c.car} · {_fmt_time(c.lap_time_s)}"
+            try:
+                r = server().upload_lap(c.path, c.lap)
+            except ServerError as exc:
+                results.append(html.Li(f"{label}: {exc}"))
+                continue
+            tried.add(c.key)
+            accepted |= bool(r.get("accepted"))
+            results.append(html.Li(f"{label}: {r.get('message') or r.get('reason')}"))
+        return html.Div([html.B("Uploaded to the leaderboard:"), html.Ul(results)]), accepted
+
+    @app.callback(Output("auto-upload", "className"), Input("auto-upload", "value"),
+                  prevent_initial_call=True)
+    def remember_auto_upload(value):
+        remember(auto_upload=bool(value))
+        return no_update
+
     @app.callback(
         Output("server-version", "data", allow_duplicate=True),
         Input("sign-out", "n_clicks"), State("server-version", "data"),
@@ -689,7 +777,8 @@ def _my_laps(recordings: list[dict], track: str | None, car: str | None) -> list
 
 def _info_dict(info) -> dict:
     return {
-        "path": info.path, "track": info.track, "car": info.car, "car_class": info.car_class,
+        "path": info.path, "track": info.track, "layout": info.layout, "car": info.car,
+        "car_class": info.car_class,
         "session_type": info.session_type, "driver": info.driver,
         "recorded_at": info.recorded_at,
         "laps": [[l.number, l.lap_time_s] for l in info.laps],

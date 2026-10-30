@@ -309,3 +309,15 @@ def test_same_lap_can_enter_a_new_ruleset(tmp_path, extracts):
     alice = sign_in(v2, "Alice")
     assert upload(v2, alice, extracts[3]).status_code == 201
     assert upload(v2, alice, extracts[3]).status_code == 409
+
+
+def test_leaderboard_marks_your_own_laps(tmp_path, extracts):
+    client, _ = make_client(tmp_path)
+    alice, bob = sign_in(client, "Alice"), sign_in(client, "Bob")
+    upload(client, alice, extracts[3])
+    params = {"track": "Algarve International Circuit", "car": "Garage 59 2026 #10:LM"}
+    assert [e["mine"] for e in client.get("/api/leaderboard", params=params,
+                                          headers=alice).json()] == [True]
+    assert [e["mine"] for e in client.get("/api/leaderboard", params=params,
+                                          headers=bob).json()] == [False]
+    assert [e["mine"] for e in client.get("/api/leaderboard", params=params).json()] == [False]
