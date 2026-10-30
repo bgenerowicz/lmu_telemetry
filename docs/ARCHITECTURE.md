@@ -81,9 +81,22 @@ Windows exe with PyInstaller, bundling `references/`.
   doesn't mark invalid laps, so the car's centre more than 1.2 m beyond
   `Track Edge` counts as off track.
 
-The server (planned): FastAPI + SQLite + files, Sign in with Steam, keeps the
-top N laps per ruleset/track/car; stores the extract (for audit) and the
-processed lap (for the app).
+The server (`src/server`): FastAPI + SQLite.
+
+- Sign in with Steam (OpenID 2.0): the app opens
+  `/auth/steam/login?return_to=<app's local address>`; the server asks Steam
+  to confirm the assertion, refuses replayed nonces, and redirects back to the
+  app with an API token. `return_to` must be a loopback address, and the app
+  only accepts tokens for sign-ins it started (a `state` value).
+- `POST /api/laps` takes an extract: size limits (upload and unpacked),
+  rate limit, `verify_lap`, then the ruleset. Each driver keeps one lap (their
+  best) per leaderboard (ruleset, track, layout, car); top N drivers only, and
+  laps pushed out are deleted. Duplicates are found by lap content (recording
+  time, lap, time, track, car), not file bytes.
+- Stored per lap: the extract (for audits) and the processed `.lap.npz`
+  (served at `/api/laps/{id}/lap.npz` for the app to compare against).
+- `server.admin` for moderation; `DELETE /api/me` deletes an account and its
+  laps.
 
 ## What the recordings contain
 
