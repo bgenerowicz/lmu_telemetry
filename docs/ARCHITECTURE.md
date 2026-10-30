@@ -66,6 +66,25 @@ local port, opens the browser, remembers the telemetry folder, and offers a
 native folder picker. `.github/workflows/build-windows.yml` packages it as a
 Windows exe with PyInstaller, bundling `references/`.
 
+## Uploads
+
+- `extract.py` cuts one lap out of a recording (all channels, full rate, a
+  couple of seconds either side) into an LMU-style DuckDB file, gzipped:
+  ~1.8 MB instead of ~13 MB for a session. The server reads it with the same
+  code as a full recording.
+- `verify.py` is what the server runs on an extract, recomputing everything
+  itself: a timed lap that didn't start in the pits; official lap time equals
+  start-to-finish time; sector splits sit where the sector changes happen;
+  distance covers the lap with no skips (and matches the track's known
+  length); time from the speed trace matches the lap time; no position jumps
+  speed can't explain; inputs in range. Track limits set `is_valid`: LMU
+  doesn't mark invalid laps, so the car's centre more than 1.2 m beyond
+  `Track Edge` counts as off track.
+
+The server (planned): FastAPI + SQLite + files, Sign in with Steam, keeps the
+top N laps per ruleset/track/car; stores the extract (for audit) and the
+processed lap (for the app).
+
 ## What the recordings contain
 
 Checked against `samples/` (LMU, October 2026):
@@ -85,9 +104,10 @@ Checked against `samples/` (LMU, October 2026):
 
 ## Open questions
 
-- **Invalid laps:** no track-limits flag found yet. Need a recording with a
-  known invalid lap to see whether `Lap Time` is missing, negative, or flagged
-  elsewhere. Until then `is_valid` is unknown, which `standard-v1` rejects.
+- **Invalid laps:** recordings have no track-limits flag (an off-track lap
+  still gets a normal `Lap Time`), so validity is derived from `Track Edge`
+  in `verify.py`. The 1.2 m threshold is calibrated on one session; check it
+  against laps the game invalidated.
 - **Default setup:** the setup JSON doesn't say whether it is the default.
   Options: compare against a stored default per car, or rule on a setup hash.
 - **Game version:** not in the recording; the uploader could read it from the
