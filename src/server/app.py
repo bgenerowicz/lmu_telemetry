@@ -31,6 +31,7 @@ from urllib.parse import urlencode, urlparse
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
+from lmu_core.laps import lap_facts, split_laps
 from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap
 from lmu_core.ruleset import Ruleset
@@ -52,7 +53,7 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     if db.init(settings.data_dir):
-        _fill_added_columns(settings.data_dir)
+        _fill_added_columns(settings)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
     if unstored:
@@ -363,22 +364,34 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
     }
 
 
-def _fill_added_columns(data_dir: Path) -> None:
-    """Columns for laps stored before they existed, from their processed laps (laps
-    processed before the car model was known keep none)."""
-    con = db.connect(data_dir)
+def _fill_added_columns(settings: Settings) -> None:
+    """Columns for laps stored before they existed, read again from each lap's
+    extract; the processed lap's facts get them too."""
+    con = db.connect(settings.data_dir)
     try:
         for (lap_id,) in con.execute("SELECT id FROM laps").fetchall():
-            _, processed = db.lap_files(data_dir, lap_id)
+            raw, processed = db.lap_files(settings.data_dir, lap_id)
             try:
-                f = ProcessedLap.load(processed).facts
-            except (OSError, ValueError, KeyError, TypeError):
+                fresh = _facts_from_extract(raw, int(settings.max_unpacked_mb * 1e6))
+                p = ProcessedLap.load(processed)
+            except Exception:  # noqa: BLE001 - a lap that can't be read keeps empty columns
                 continue
-            con.execute(
-                "UPDATE laps SET " + ", ".join(f"{c} = ?" for c in db.ADDED_COLUMNS) +
-                " WHERE id = ?", (*(getattr(f, c) for c in db.ADDED_COLUMNS), lap_id))
+            added = {c: getattr(fresh, c) for c in db.ADDED_COLUMNS}
+            con.execute("UPDATE laps SET " + ", ".join(f"{c} = ?" for c in added) +
+                        " WHERE id = ?", (*added.values(), lap_id))
+            dataclasses.replace(p, facts=dataclasses.replace(p.facts, **added)).save(processed)
     finally:
         con.close()
+
+
+def _facts_from_extract(path: Path, limit: int):
+    with tempfile.TemporaryDirectory() as tmp:
+        unpacked = Path(tmp) / "lap.duckdb"
+        _gunzip(path.read_bytes(), unpacked, limit)
+        with Recording(unpacked) as rec:
+            number = int(rec.metadata["ExtractedLap"])
+            lap = next(l for l in split_laps(rec) if l.number == number)
+            return lap_facts(rec, lap)
 
 
 def _rule_reason(result, track_limits: str) -> str:

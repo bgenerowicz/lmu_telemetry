@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lmu_core.carmodel import car_model
+from lmu_core.carmodel import car_model, setup_is_fixed
 from lmu_core.lapfacts import LapFacts
 from lmu_core.recording import Recording
 
@@ -91,6 +91,7 @@ def lap_facts(rec: Recording, lap: Lap) -> LapFacts:
         track_wetness_pct=_event_at(rec, "Minimum Path Wetness", lap.start_ts),
         # The setup JSON doesn't say whether it is the default setup.
         setup_is_default=None,
+        setup_fixed=setup_is_fixed(meta.get("CarSetup")),
         fuel_at_start_l=_channel_at(rec, "Fuel Level", lap.start_ts),
         # Only a compound index is recorded; its name depends on the car.
         tyre_compound=None,

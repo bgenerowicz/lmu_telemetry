@@ -816,8 +816,8 @@ def _fmt_recorded(value: str | None) -> str:
     return value.replace("T", " ").replace("_", ":")[:16]
 
 def _fmt_conditions(facts: dict) -> str:
-    """Weather, air and track temperature and fuel in one line, e.g.
-    "Clear · air 18° · track 21° · 77 L fuel"; whatever is known."""
+    """Weather, air and track temperature, fuel and setup in one line, e.g.
+    "Clear · air 18° · track 21° · 77 L fuel · open setup"; whatever is known."""
     def num(key: str) -> float | None:
         value = facts.get(key)
         return None if value is None else round(value)
@@ -828,6 +828,8 @@ def _fmt_conditions(facts: dict) -> str:
         parts.append(f"track {track}°")
     if (fuel := num("fuel_at_start_l")) is not None:
         parts.append(f"{fuel} L fuel")
+    if facts.get("setup_fixed") is not None:
+        parts.append("fixed setup" if facts["setup_fixed"] else "open setup")
     return " · ".join(p for p in parts if p)
 
 

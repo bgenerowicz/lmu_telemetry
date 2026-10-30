@@ -72,4 +72,6 @@ def test_conditions_in_one_line():
     assert _fmt_conditions({"weather": "Clear", "ambient_temp_c": 18.3, "track_temp_c": 20.8,
                             "fuel_at_start_l": 76.8}) == "Clear · air 18° · track 21° · 77 L fuel"
     assert _fmt_conditions({"weather": None, "track_temp_c": 25.2}) == "track 25°"
+    assert _fmt_conditions({"weather": "Clear", "setup_fixed": 1}) == "Clear · fixed setup"
+    assert _fmt_conditions({"setup_fixed": False}) == "open setup"
     assert _fmt_conditions({}) == ""

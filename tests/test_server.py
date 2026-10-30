@@ -358,7 +358,7 @@ def test_leaderboard_shows_conditions(tmp_path, extracts):
     assert entry["weather"] == "Clear" and entry["session_type"] == "Practice"
     assert entry["ambient_temp_c"] == pytest.approx(18.3, abs=0.5)
     assert entry["track_temp_c"] == pytest.approx(20.8, abs=0.5)
-    assert entry["fuel_at_start_l"] > 0
+    assert entry["fuel_at_start_l"] > 0 and entry["setup_fixed"] == 0
 
     # A database from before conditions were stored gets them from the laps' files.
     con = sqlite3.connect(settings.data_dir / "lmu.sqlite3")

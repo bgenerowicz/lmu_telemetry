@@ -1,4 +1,4 @@
-"""Which car model a recording is in.
+"""Which car model a recording is in, and whether its setup was fixed.
 
 A recording's ``CarName`` is the entry picked in the game: a team and livery
 ("Garage 59 2026 #10:LM"), not the model. The setup (``CarSetup``) gives the
@@ -6,6 +6,11 @@ model away: each model has its own adjustment ranges, the same for every
 livery of it. So the model is looked up by a fingerprint of those ranges;
 failing that, custom liveries are named after their make ("McLaren Custom
 Team 2025 #397"); failing that, the entry name stands in for the model.
+
+The setup also says which settings could be changed (``isFreeSetting``). In a
+fixed-setup session only the driver's settings can (aids, brake bias, fuel,
+tyres, pit stops: ~30 of ~170); with an open setup nearly all of them. It
+doesn't say whether an open setup was the game's default.
 """
 
 from __future__ import annotations
@@ -41,18 +46,32 @@ def car_model(car_name: str, car_setup: str | None) -> str:
     return car_name
 
 
-def fingerprint(car_setup: str | None) -> str | None:
-    """A hash of the setup's adjustment ranges, which only depend on the model."""
+def setup_is_fixed(car_setup: str | None) -> bool | None:
+    """Whether the session fixed the setup (None if the setup isn't there)."""
+    items = _setup_items(car_setup)
+    usable = [item for item in items.values() if item.get("available")]
+    if not usable:
+        return None
+    free = sum(1 for item in usable if item.get("isFreeSetting"))
+    return free < len(usable) / 2
+
+
+def _setup_items(car_setup: str | None) -> dict[str, dict]:
     try:
         setup = json.loads(car_setup or "")
     except ValueError:
-        return None
+        return {}
     if not isinstance(setup, dict):
-        return None
+        return {}
+    return {k: v for k, v in setup.items() if k.startswith(("VM_", "WM_")) and isinstance(v, dict)}
+
+
+def fingerprint(car_setup: str | None) -> str | None:
+    """A hash of the setup's adjustment ranges, which only depend on the model."""
     ranges = sorted(
         (key, item.get("minValue"), item.get("maxValue"))
-        for key, item in setup.items()
-        if key.startswith("VM_") and isinstance(item, dict)
+        for key, item in _setup_items(car_setup).items()
+        if key.startswith("VM_")
     )
     if not ranges:
         return None

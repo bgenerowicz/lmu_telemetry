@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS used_nonces (
 # databases made before they were stored.
 CONDITION_COLUMNS = {
     "session_type": "TEXT", "weather": "TEXT", "ambient_temp_c": "REAL",
-    "track_temp_c": "REAL", "fuel_at_start_l": "REAL",
+    "track_temp_c": "REAL", "fuel_at_start_l": "REAL", "setup_fixed": "INTEGER",
 }
 # Columns added since the first version, filled from each lap's LapFacts.
 ADDED_COLUMNS = {**CONDITION_COLUMNS, "car_model": "TEXT"}

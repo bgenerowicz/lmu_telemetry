@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from lmu_core.carmodel import car_model, fingerprint
+from lmu_core.carmodel import car_model, fingerprint, setup_is_fixed
 
 ALGARVE = Path(__file__).parent.parent / "samples" / (
     "Algarve International Circuit_P_2026-10-30T12_56_57Z.duckdb"
@@ -28,3 +28,13 @@ def test_unknown_setups_fall_back_to_the_name():
     assert car_model("Mustang Custom Team 2026 #397", setup) == "Ford Mustang GT3"
     assert car_model("Some Team 2026 #7:LM", None) == "Some Team 2026 #7:LM"
     assert fingerprint("not json") is None
+
+
+def test_fixed_setup_when_only_driver_settings_are_free():
+    def setup(free_keys, total=10):
+        return json.dumps({f"VM_{i}": {"available": True, "isFreeSetting": i < free_keys}
+                           for i in range(total)})
+
+    assert setup_is_fixed(setup(3)) is True
+    assert setup_is_fixed(setup(9)) is False
+    assert setup_is_fixed(None) is None

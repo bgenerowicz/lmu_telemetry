@@ -31,6 +31,8 @@ class LapFacts:
 
     # Car state.
     setup_is_default: bool | None = None
+    # The session fixed the setup (lmu_core.carmodel.setup_is_fixed).
+    setup_fixed: bool | None = None
     fuel_at_start_l: float | None = None
     tyre_compound: str | None = None
 
