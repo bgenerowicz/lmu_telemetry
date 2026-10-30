@@ -429,10 +429,11 @@ def create_app(
                           "compare against your fastest time in each section.", className="note")
         analysis = analyse({"you": lap, "ref": ref}, reference="ref")
         warning = ""
-        if ref.facts.car != lap.facts.car:
+        ref_car, lap_car = (f.car_model or f.car for f in (ref.facts, lap.facts))
+        if ref_car != lap_car:
             same_class = f" (both {lap.facts.car_class})" if lap.facts.car_class else ""
-            warning = (f"Different car: the reference is the {ref.facts.car}, yours is the "
-                       f"{lap.facts.car}{same_class}. Part of the gap may be the car, not "
+            warning = (f"Different car: the reference is the {ref_car}, yours is the "
+                       f"{lap_car}{same_class}. Part of the gap may be the car, not "
                        "the driving.")
         intro = f"Compared with {ref_label}, section by section."
         return _results_view(analysis, "you", "ref", lap_label, ref_label, intro, warning)
@@ -573,7 +574,7 @@ def create_app(
             found = _find(recordings, ruleset)
         if not found:
             return None, hide, status, new_version
-        place = " for its car" if "car" in ruleset.leaderboard_key + ruleset.top_n_per else ""
+        place = " for its car" if _per_car(ruleset) else ""
         items = [html.Li(f"{c.track} · {c.car} · {_fmt_time(c.lap_time_s)}: "
                          f"would be #{c.rank}{place}") for c in found]
         intro = "Your laps that would make the leaderboard" + (
@@ -582,7 +583,7 @@ def create_app(
                 status, new_version)
 
     def _find(recordings, ruleset):
-        per_car = "car" in ruleset.leaderboard_key + ruleset.top_n_per
+        per_car = _per_car(ruleset)
 
         def entries_for(track, car, car_class):
             if per_car or not car_class:
@@ -779,6 +780,11 @@ def _same_lap(a, b) -> bool:
     fa, fb = a.facts, b.facts
     return (fa.recorded_at, fa.lap_number, fa.driver) == (fb.recorded_at, fb.lap_number, fb.driver) \
         and fa.recorded_at is not None
+
+
+def _per_car(ruleset: Ruleset) -> bool:
+    """Whether laps compete per car (model or entry) rather than per class."""
+    return bool({"car", "car_model"} & {*ruleset.leaderboard_key, *ruleset.top_n_per})
 
 
 def _lap_counts(mine: int, experts: int, online: int) -> str:

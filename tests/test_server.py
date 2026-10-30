@@ -369,3 +369,22 @@ def test_leaderboard_shows_conditions(tmp_path, extracts):
     client, _ = make_client(tmp_path)
     [again] = client.get("/api/leaderboard", params=params).json()
     assert {c: again[c] for c in db.CONDITION_COLUMNS} == {c: entry[c] for c in db.CONDITION_COLUMNS}
+
+
+def test_leaderboards_group_liveries_of_a_model(tmp_path, extracts):
+    ruleset = tmp_path / "model.yaml"
+    ruleset.write_text((ROOT / "rulesets" / "loose-v4.yaml").read_text().replace(
+        "top_n: 5", "top_n: 1"))
+    client, _ = make_client(tmp_path, ruleset=ruleset)
+    alice, bob = sign_in(client, "Alice"), sign_in(client, "Bob")
+    # Another livery of the same McLaren (same setup ranges, so the same model).
+    custom = "McLaren Custom Team 2025 #397"
+    assert upload(client, alice, extracts[2]).status_code == 201
+    r = upload(client, bob, as_car(extracts[3], custom)).json()
+    assert r["message"] == ("Accepted: #1 on Algarve International Circuit in the "
+                            "McLaren 720S GT3 (#1 overall in GT3).")
+    # Top 1 per model: Bob's lap pushed Alice's out, though their liveries differ.
+    board = client.get("/api/leaderboard", params={
+        "track": "Algarve International Circuit", "car_model": "McLaren 720S GT3"}).json()
+    assert [(e["driver"], e["car"], e["car_model"]) for e in board] == [
+        ("Bob", custom, "McLaren 720S GT3")]

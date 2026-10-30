@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from lmu_core.carmodel import car_model
 from lmu_core.laps import split_laps
 from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap, resample_lap
@@ -32,7 +33,7 @@ class RecordingInfo:
     path: str
     track: str
     layout: str | None
-    car: str
+    car: str  # the model (lmu_core.carmodel)
     car_class: str | None
     session_type: str | None
     driver: str | None
@@ -48,7 +49,7 @@ class RecordingInfo:
 class Reference:
     path: str
     track: str
-    car: str
+    car: str  # the model, where known
     car_class: str | None
     driver: str | None
     lap_time_s: float
@@ -78,7 +79,7 @@ def _scan_file(path: str, size: int, mtime: float) -> RecordingInfo:
         path=path,
         track=meta.get("TrackName", "?"),
         layout=meta.get("TrackLayout"),
-        car=meta.get("CarName", "?"),
+        car=car_model(meta.get("CarName", "?"), meta.get("CarSetup")),
         car_class=meta.get("CarClass"),
         session_type=meta.get("SessionType"),
         driver=meta.get("DriverName"),
@@ -109,7 +110,7 @@ def load_references(folders: list[str | Path]) -> tuple[list[Reference], list[st
             try:
                 facts = load_reference(path).facts
                 refs.append(
-                    Reference(str(path), facts.track, facts.car, facts.car_class,
+                    Reference(str(path), facts.track, facts.car_model or facts.car, facts.car_class,
                               facts.driver, float(facts.lap_time_s))
                 )
             except Exception as exc:  # noqa: BLE001

@@ -60,7 +60,7 @@ def test_upload_compare_download(server_url, tmp_path):
     off_track = client.upload_lap(ALGARVE, 1)
     assert not off_track["accepted"] and "off track" in off_track["reason"]
 
-    [entry] = client.leaderboard("Algarve International Circuit", "Garage 59 2026 #10:LM")
+    [entry] = client.leaderboard("Algarve International Circuit", "McLaren 720S GT3")
     path = client.download_lap(entry["id"], tmp_path)
     assert ProcessedLap.load(path).facts.lap_number == 3
     assert client.download_lap(entry["id"], tmp_path) == path  # cached
@@ -73,7 +73,7 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
     [key] = [k for k in app.callback_map if "board.data" in k]
     board = app.callback_map[key]["callback"].__wrapped__
-    rows, style, note, picker = board("Algarve International Circuit", "Garage 59 2026 #10:LM",
+    rows, style, note, picker = board("Algarve International Circuit", "McLaren 720S GT3",
                                       [], 0, "class")
     assert [(r["rank"], r["driver"], r["selected"]) for r in rows] == [(1, "Alice", 1)]
     assert style == {} and "GT3 at Algarve" in str(note) and picker != {"display": "none"}
@@ -81,10 +81,10 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     assert rows == [] and "No laps" in str(note)
 
     # Just the car: the same lap, not highlighted (it isn't this user's).
-    rows, style, note, _ = board("Algarve International Circuit", "Garage 59 2026 #10:LM",
+    rows, style, note, _ = board("Algarve International Circuit", "McLaren 720S GT3",
                                  [], 0, "car")
     assert [(r["driver"], r["selected"]) for r in rows] == [("Alice", 0)]
-    assert "Garage 59 2026 #10:LM at Algarve" in str(note)
+    assert "McLaren 720S GT3 at Algarve" in str(note)
 
 
 def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path):
@@ -97,7 +97,7 @@ def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path)
     mine = [{"track": track, "car": "Another GT3 #1", "car_class": "GT3", "laps": []}]
     labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
                                                                   mine, 0, 0, None, None)[0]]
-    assert any("Alice" in l and "other car: Garage 59 2026 #10:LM" in l for l in labels)
+    assert any("Alice" in l and "other car: McLaren 720S GT3" in l for l in labels)
     other_class = [{**mine[0], "car_class": "Hypercar"}]
     labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
                                                                   other_class, 0, 0, None, None)[0]]
@@ -146,7 +146,7 @@ def test_clicking_a_leaderboard_row_picks_that_lap(server_url, tmp_path):
     ServerClient(server_url, token_for(server_url, "Alice")).upload_lap(ALGARVE, 3)
     client = ServerClient(server_url, token_for(server_url, "Bob"))
     client.upload_lap(ALGARVE, 2)
-    track, car = "Algarve International Circuit", "Garage 59 2026 #10:LM"
+    track, car = "Algarve International Circuit", "McLaren 720S GT3"
     # Runs last: Bob's upload would change the candidates above.
     # Bob's lap: not the car's fastest, so only offered once picked.
     lap_id = next(e["id"] for e in client.leaderboard(track, car) if e["driver"] == "Bob")

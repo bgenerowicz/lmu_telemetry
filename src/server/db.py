@@ -57,6 +57,8 @@ CONDITION_COLUMNS = {
     "session_type": "TEXT", "weather": "TEXT", "ambient_temp_c": "REAL",
     "track_temp_c": "REAL", "fuel_at_start_l": "REAL",
 }
+# Columns added since the first version, filled from each lap's LapFacts.
+ADDED_COLUMNS = {**CONDITION_COLUMNS, "car_model": "TEXT"}
 
 
 def connect(data_dir: Path) -> sqlite3.Connection:
@@ -77,9 +79,9 @@ def init(data_dir: Path) -> list[str]:
     try:
         con.executescript(SCHEMA)
         have = {r["name"] for r in con.execute("PRAGMA table_info(laps)")}
-        added = [c for c in CONDITION_COLUMNS if c not in have]
+        added = [c for c in ADDED_COLUMNS if c not in have]
         for c in added:
-            con.execute(f"ALTER TABLE laps ADD COLUMN {c} {CONDITION_COLUMNS[c]}")
+            con.execute(f"ALTER TABLE laps ADD COLUMN {c} {ADDED_COLUMNS[c]}")
     finally:
         con.close()
     (data_dir / "laps").mkdir(parents=True, exist_ok=True)

@@ -17,6 +17,8 @@ class LapFacts:
     car: str
     layout: str | None = None
     car_class: str | None = None
+    # The model (lmu_core.carmodel); ``car`` is the entry (team and livery).
+    car_model: str | None = None
     game_version: str | None = None
 
     # Session and conditions.

@@ -41,7 +41,7 @@ from server.config import Settings
 # Track length is checked against earlier accepted laps once there are this many.
 KNOWN_LENGTH_MIN_LAPS = 3
 # Lap fields stored as columns, which leaderboards can be keyed by.
-STORED_FIELDS = {"track", "layout", "car", "car_class"}
+STORED_FIELDS = {"track", "layout", "car", "car_class", "car_model"}
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -52,7 +52,7 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     if db.init(settings.data_dir):
-        _fill_conditions(settings.data_dir)
+        _fill_added_columns(settings.data_dir)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
     if unstored:
@@ -157,7 +157,8 @@ def create_app(
     @app.get("/api/leaderboards")
     def leaderboards(con=Depends(get_con)) -> list[dict]:
         rows = con.execute(
-            "SELECT track, layout, car, car_class, COUNT(*) AS laps, MIN(lap_time_s) AS best "
+            "SELECT track, layout, car, car_class, car_model, COUNT(*) AS laps, "
+            "MIN(lap_time_s) AS best "
             "FROM laps WHERE ruleset_id = ? GROUP BY track, layout, car ORDER BY track, car",
             (ruleset.id,),
         ).fetchall()
@@ -165,22 +166,23 @@ def create_app(
 
     @app.get("/api/leaderboard")
     def leaderboard(track: str, car: str | None = None, car_class: str | None = None,
-                    layout: str | None = None, con=Depends(get_con),
-                    authorization: str | None = Header(default=None)):
-        """Laps at a track, fastest first: one car's, one class's, or all. Anyone can
-        read it; for a signed-in app, ``mine`` marks the user's own laps."""
+                    layout: str | None = None, car_model: str | None = None,
+                    con=Depends(get_con), authorization: str | None = Header(default=None)):
+        """Laps at a track, fastest first: one car's (entry or model), one class's, or
+        all. Anyone can read it; for a signed-in app, ``mine`` marks the user's own laps."""
         me = None
         if authorization and authorization.startswith("Bearer "):
             me = db.user_for_token(con, authorization.removeprefix("Bearer ").strip())
         rows = con.execute(
             "SELECT laps.id, laps.user_id, users.name AS driver, laps.driver_name, "
             "laps.lap_time_s, laps.car, laps.car_class, laps.layout, laps.recorded_at, "
-            "laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.CONDITION_COLUMNS) +
+            "laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.ADDED_COLUMNS) +
             " FROM laps JOIN users ON users.id = laps.user_id "
             "WHERE ruleset_id = ? AND track = ? AND (? IS NULL OR car = ?) "
             "AND (? IS NULL OR car_class = ?) AND (? IS NULL OR layout = ?) "
-            "AND users.banned = 0 ORDER BY lap_time_s",
-            (ruleset.id, track, car, car, car_class, car_class, layout, layout),
+            "AND (? IS NULL OR car_model = ?) AND users.banned = 0 ORDER BY lap_time_s",
+            (ruleset.id, track, car, car, car_class, car_class, layout, layout,
+             car_model, car_model),
         ).fetchall()
         return [{"rank": i, **{k: r[k] for k in r.keys() if k != "user_id"},
                  "mine": me is not None and r["user_id"] == me["id"]}
@@ -297,7 +299,9 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
 
     board, key = where([*ruleset.leaderboard_key, *ruleset.top_n_per])
     whole_board, whole_key = where(ruleset.leaderboard_key)
-    within = f" in the {f.car}" if "car" in ruleset.top_n_per else ""
+    # The car laps compete within: the entry under top_n_per [car], else the model.
+    car_name = f.car if "car" in ruleset.top_n_per else (f.car_model or f.car)
+    within = f" in the {car_name}" if {"car", "car_model"} & set(ruleset.top_n_per) else ""
     con.execute("BEGIN IMMEDIATE")
     try:
         own = con.execute(f"SELECT id, lap_time_s FROM laps WHERE {board} AND user_id = ?",
@@ -330,7 +334,7 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
             "lap_time_s": f.lap_time_s, "track_length_m": float(v.processed.distance_m[-1]),
             "driver_name": f.driver, "recorded_at": f.recorded_at, "uploaded_at": time.time(),
             "file_hash": fingerprint, "report_json": json.dumps({"checks": checks, "rules": rules}),
-            **{c: getattr(f, c) for c in db.CONDITION_COLUMNS},
+            **{c: getattr(f, c) for c in db.ADDED_COLUMNS},
         }
         con.execute(f"INSERT INTO laps ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
                     tuple(row.values()))
@@ -354,13 +358,14 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
     return 201, {
         "accepted": True, "lap_id": lap_id, "rank": rank, "overall_rank": overall,
         "lap_time_s": f.lap_time_s,
-        "message": f"Accepted: #{rank} on {f.track} in the {f.car}{overall_note}.",
+        "message": f"Accepted: #{rank} on {f.track} in the {car_name}{overall_note}.",
         "checks": checks, "rules": rules,
     }
 
 
-def _fill_conditions(data_dir: Path) -> None:
-    """Conditions for laps stored before they had columns, from their processed laps."""
+def _fill_added_columns(data_dir: Path) -> None:
+    """Columns for laps stored before they existed, from their processed laps (laps
+    processed before the car model was known keep none)."""
     con = db.connect(data_dir)
     try:
         for (lap_id,) in con.execute("SELECT id FROM laps").fetchall():
@@ -370,8 +375,8 @@ def _fill_conditions(data_dir: Path) -> None:
             except (OSError, ValueError, KeyError, TypeError):
                 continue
             con.execute(
-                "UPDATE laps SET " + ", ".join(f"{c} = ?" for c in db.CONDITION_COLUMNS) +
-                " WHERE id = ?", (*(getattr(f, c) for c in db.CONDITION_COLUMNS), lap_id))
+                "UPDATE laps SET " + ", ".join(f"{c} = ?" for c in db.ADDED_COLUMNS) +
+                " WHERE id = ?", (*(getattr(f, c) for c in db.ADDED_COLUMNS), lap_id))
     finally:
         con.close()
 

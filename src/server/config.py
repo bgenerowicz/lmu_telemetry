@@ -31,7 +31,7 @@ class Settings:
         return cls(
             data_dir=Path(env("LMU_DATA_DIR", ROOT / "data" / "server")),
             public_url=env("LMU_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/"),
-            ruleset_path=Path(env("LMU_RULESET", ROOT / "rulesets" / "loose-v3.yaml")),
+            ruleset_path=Path(env("LMU_RULESET", ROOT / "rulesets" / "loose-v4.yaml")),
             steam_api_key=env("STEAM_API_KEY") or None,
             max_upload_mb=float(env("LMU_MAX_UPLOAD_MB", 10)),
             uploads_per_hour=int(env("LMU_UPLOADS_PER_HOUR", 30)),

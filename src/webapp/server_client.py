@@ -20,6 +20,9 @@ class ServerError(Exception):
 
 
 class ServerClient:
+    """Leaderboard entries come with ``car`` as the car model (as everywhere in the
+    app; the server's ``car_model``) and ``entry`` as the team and livery."""
+
     def __init__(self, url: str, token: str | None = None):
         self.url = url.rstrip("/")
         self.token = token
@@ -58,14 +61,15 @@ class ServerClient:
         return self._get("/api/ruleset")
 
     def leaderboards(self) -> list[dict]:
-        return self._get("/api/leaderboards")
+        return _by_model(self._get("/api/leaderboards"))
 
     def leaderboard(self, track: str, car: str) -> list[dict]:
-        return self._get("/api/leaderboard", track=track, car=car)
+        """One car model's laps at a track, fastest first."""
+        return _by_model(self._get("/api/leaderboard", track=track, car_model=car))
 
     def class_leaderboard(self, track: str, car_class: str) -> list[dict]:
         """Every car of a class at a track, fastest first."""
-        return self._get("/api/leaderboard", track=track, car_class=car_class)
+        return _by_model(self._get("/api/leaderboard", track=track, car_class=car_class))
 
     def download_lap(self, lap_id: str, cache_dir: Path) -> Path:
         """The processed lap, from the local cache or the server."""
@@ -106,6 +110,10 @@ class ServerClient:
             raise ServerError(_detail(r))
         self.forget_cache()
         return body
+
+
+def _by_model(entries: list[dict]) -> list[dict]:
+    return [{**e, "car": e.get("car_model") or e["car"], "entry": e["car"]} for e in entries]
 
 
 def _detail(r: httpx.Response) -> str:

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from lmu_core.carmodel import car_model
 from lmu_core.lapfacts import LapFacts
 from lmu_core.recording import Recording
 
@@ -79,6 +80,7 @@ def lap_facts(rec: Recording, lap: Lap) -> LapFacts:
         layout=meta.get("TrackLayout"),
         car=meta.get("CarName", ""),
         car_class=meta.get("CarClass"),
+        car_model=car_model(meta.get("CarName", ""), meta.get("CarSetup")),
         # Not in the recording; the uploader will have to get it elsewhere.
         game_version=None,
         session_type=meta.get("SessionType"),
