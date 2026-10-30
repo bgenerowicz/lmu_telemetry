@@ -244,9 +244,9 @@ def create_app(
         options = []
         for t in sorted(names):
             mine = sum(len(r["laps"]) for r in recordings if r["track"] == t)
-            experts = sum(1 for r in refs if r.track == t) + sum(
-                b["laps"] for b in boards if b["track"] == t)
-            options.append({"label": f"{t}  ({mine} your laps · {experts} expert)", "value": t})
+            experts = sum(1 for r in refs if r.track == t)
+            online = sum(b["laps"] for b in boards if b["track"] == t)
+            options.append({"label": f"{t}  ({_lap_counts(mine, experts, online)})", "value": t})
         if current in names:
             return options, current
         default = recordings[0]["track"] if recordings else (refs[0].track if refs else None)
@@ -265,9 +265,9 @@ def create_app(
         options = []
         for c in sorted(names):
             n_mine = sum(len(r["laps"]) for r in mine if r["car"] == c)
-            n_ref = sum(1 for r in refs if r.car == c) + sum(
-                b["laps"] for b in boards if b["car"] == c)
-            options.append({"label": f"{c}  ({n_mine} your laps · {n_ref} expert)", "value": c})
+            n_ref = sum(1 for r in refs if r.car == c)
+            n_online = sum(b["laps"] for b in boards if b["car"] == c)
+            options.append({"label": f"{c}  ({_lap_counts(n_mine, n_ref, n_online)})", "value": c})
         if current in names:
             return options, current
         default = mine[0]["car"] if mine else (
@@ -700,6 +700,14 @@ def _same_lap(a, b) -> bool:
     fa, fb = a.facts, b.facts
     return (fa.recorded_at, fa.lap_number, fa.driver) == (fb.recorded_at, fb.lap_number, fb.driver) \
         and fa.recorded_at is not None
+
+
+def _lap_counts(mine: int, experts: int, online: int) -> str:
+    """For the track and car lists: saved expert laps and leaderboard laps apart,
+    so the count matches what the leaderboard shows."""
+    parts = [f"{mine} your laps", f"{experts} expert" if experts else "",
+             f"{online} on the leaderboard" if online else ""]
+    return " · ".join(p for p in parts if p)
 
 
 def _fmt_time(seconds: float | None) -> str:
