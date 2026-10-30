@@ -6,18 +6,29 @@
     python -m server.admin ban STEAM_ID        (also deletes their laps)
     python -m server.admin unban STEAM_ID
     python -m server.admin make-admin STEAM_ID
+    python -m server.admin import-lap --as NAME EXTRACT...
 
 In Docker: docker compose exec lmu-server python -m server.admin users
+
+import-lap adds lap extracts (``lmu_core.extract``) for a driver who hasn't
+signed in, e.g. telemetry they sent: each goes through the same checks as an
+upload, filed under a placeholder account with that name (not a Steam account,
+so nobody can sign in as it).
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from types import SimpleNamespace
 
+from lmu_core.ruleset import Ruleset
 from server import db
-from server.app import _delete_lap_files
+from server.app import _delete_lap_files, _process_upload
 from server.config import Settings
+
+# Steam IDs are numbers, so these can't clash with a real account.
+IMPORTED_PREFIX = "imported:"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,6 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     laps.add_argument("--track")
     for name in ("delete-lap", "ban", "unban", "make-admin"):
         sub.add_parser(name).add_argument("target")
+    imp = sub.add_parser("import-lap")
+    imp.add_argument("--as", dest="name", required=True, help="driver name to show")
+    imp.add_argument("files", nargs="+", help="lap extracts (.duckdb.gz)")
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
@@ -49,6 +63,13 @@ def main(argv: list[str] | None = None) -> int:
             _delete_lap_files(settings.data_dir, args.target)
             n = con.execute("DELETE FROM laps WHERE id = ?", (args.target,)).rowcount
             print(f"deleted {n} lap(s)")
+        elif args.command == "import-lap":
+            ruleset = Ruleset.load(settings.ruleset_path)
+            user = db.upsert_user(con, f"{IMPORTED_PREFIX}{args.name}", args.name)
+            for path in args.files:
+                with open(path, "rb") as f:
+                    _, body = _process_upload(settings, ruleset, con, user, SimpleNamespace(file=f))
+                print(f"{path}: {body.get('message') or body['reason']}")
         else:
             user = con.execute("SELECT * FROM users WHERE steam_id = ?", (args.target,)).fetchone()
             if user is None:

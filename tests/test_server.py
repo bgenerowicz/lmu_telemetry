@@ -234,3 +234,22 @@ def test_admin_ban_removes_laps_and_access(tmp_path, extracts, monkeypatch):
     assert admin.main(["ban", steam_id]) == 0
     assert client.get("/api/leaderboards").json() == []
     assert client.get("/api/me", headers=alice).status_code == 401
+
+
+def test_admin_import_lap_for_a_driver_without_an_account(tmp_path, extracts, monkeypatch):
+    from server import admin
+
+    client, settings = make_client(tmp_path)
+    for n in (1, 3):
+        (tmp_path / f"lap{n}.duckdb.gz").write_bytes(extracts[n])
+    monkeypatch.setenv("LMU_DATA_DIR", str(settings.data_dir))
+    files = [str(tmp_path / "lap1.duckdb.gz"), str(tmp_path / "lap3.duckdb.gz")]
+    assert admin.main(["import-lap", "--as", "Daniel", *files]) == 0
+    [board] = client.get("/api/leaderboards").json()
+    [entry] = client.get("/api/leaderboard", params={"track": board["track"],
+                                                     "car": board["car"]}).json()
+    assert entry["driver"] == "Daniel" and entry["lap_time_s"] == pytest.approx(111.602, abs=0.01)
+    # Same checks as an upload: the same lap again is a duplicate.
+    assert admin.main(["import-lap", "--as", "Daniel", files[1]]) == 0
+    assert len(client.get("/api/leaderboard", params={"track": board["track"],
+                                                      "car": board["car"]}).json()) == 1

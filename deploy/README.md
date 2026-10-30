@@ -64,6 +64,13 @@ docker compose exec lmu-server python -m server.admin delete-lap LAP_ID
 docker compose exec lmu-server python -m server.admin ban STEAM_ID
 ```
 
+To add laps for a driver who sent their telemetry instead of uploading (same
+checks as an upload, shown under NAME, no Steam account), copy lap extracts
+into `data/` and:
+```bash
+docker compose exec lmu-server python -m server.admin import-lap --as "NAME" /data/import/*.duckdb.gz
+```
+
 ## Backups
 
 Everything is in `deploy/data/`. SQLite is in WAL mode; copy it safely with:
