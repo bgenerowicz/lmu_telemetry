@@ -34,7 +34,8 @@ where you lose time and why, with traces and a track map.
    on the map to zoom, drag to move.
 
 **Online leaderboard**: anyone can see it; to add your laps, **Sign in with
-Steam** and **Upload selected lap to the leaderboard**. The server checks the
+Steam**. The app finds your laps that would make the leaderboard and uploads
+them (automatically, or with **Upload these laps**). The server checks the
 lap itself (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#uploads)) and
 keeps one leaderboard per class (e.g. GT3) at each track, with each car's top 5
 drivers (each driver's best lap in that car), under the current
@@ -43,10 +44,8 @@ drivers (each driver's best lap in that car), under the current
 **Compare against** as "(online)"; other cars of the same class come with a
 warning.
 
-**Save selected lap as expert lap** stores a lap in
-`Documents\LMU Lap Analyser\references`, where the app picks it up. To ship
-it with the app for everyone, copy it to [`references/`](references/) and
-commit it.
+Expert laps (`.lap.npz`) in `Documents\LMU Lap Analyser\references` or in
+[`references/`](references/) (shipped with the app) are picked up too.
 
 Windows may warn about an unknown publisher, since the exe isn't signed:
 choose "More info" → "Run anyway".

@@ -35,7 +35,6 @@ from lmu_core.library import (
     load_lap,
     load_reference,
     load_references,
-    save_reference,
     scan_folder,
 )
 from lmu_core.ruleset import Ruleset
@@ -49,6 +48,14 @@ SELF_SECTIONS = "self:sections"
 # Online leaderboard views: the whole class, or the selected car only.
 BOARD_CLASS = "class"
 BOARD_CAR = "car"
+BOARD_CLICKED_ROW = {"backgroundColor": "#dbe6fb"}
+BOARD_STYLES = [
+    # The selected car's laps stand out on the class leaderboard.
+    {"if": {"filter_query": "{selected} = 1"}, "backgroundColor": "#eef3fd", "fontWeight": 600},
+    # Clicking marks the whole row (board_row), so the clicked cell looks like the rest of it.
+    *({"if": {"state": state}, **BOARD_CLICKED_ROW, "border": "none",
+       "borderBottom": "1px solid #d3d3d3"} for state in ("active", "selected")),
+]
 # Laps used for "your fastest sections"; more adds little and costs time.
 MAX_SECTION_LAPS = 30
 
@@ -191,11 +198,7 @@ def create_app(
                         style_cell={"fontFamily": FONT, "fontSize": 14, "padding": "6px 10px",
                                     "textAlign": "left"},
                         style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
-                        # The selected car's laps stand out on the class leaderboard.
-                        style_data_conditional=[
-                            {"if": {"filter_query": "{selected} = 1"},
-                             "backgroundColor": "#eef3fd", "fontWeight": 600},
-                        ],
+                        style_data_conditional=BOARD_STYLES,
                     ),
                 ]),
             ]),
@@ -222,14 +225,6 @@ def create_app(
                     html.Div("4. Compare against", className="step-title"),
                     dcc.RadioItems(id="reference", className="radio-list"),
                     html.Div(id="reference-empty", className="muted"),
-                    html.Div(className="row mt wrap", children=[
-                        html.Button("Upload selected lap to the leaderboard", id="upload",
-                                    className="btn primary"),
-                        html.Button("Save selected lap as expert lap", id="save-ref",
-                                    className="btn"),
-                    ]),
-                    dcc.Loading(html.Div(id="upload-status", className="mt"), type="dot"),
-                    html.Div(id="save-status", className="muted mt"),
                 ]),
             ]),
             dcc.Loading(html.Div(id="results"), type="default"),
@@ -378,19 +373,6 @@ def create_app(
         return options, (values[0] if values else None), empty
 
     @app.callback(
-        Output("save-status", "children"), Output("refs-version", "data"),
-        Input("save-ref", "n_clicks"),
-        State("laps", "data"), State("laps", "selected_rows"), State("refs-version", "data"),
-        prevent_initial_call=True,
-    )
-    def save_expert(_, rows, selected, version):
-        if not rows or not selected:
-            return "Select one of your laps first.", no_update
-        row = rows[selected[0]]
-        path = save_reference(load_lap(row["path"], row["lap"]), user_reference_dir)
-        return f"Saved to {path}", version + 1
-
-    @app.callback(
         Output("results", "children"),
         Input("laps", "selected_rows"), Input("reference", "value"),
         State("laps", "data"), State("recordings", "data"),
@@ -535,6 +517,18 @@ def create_app(
             f"{car} at {track}: top drivers"
         return rows, {}, html.B(title), picker
 
+    @app.callback(
+        Output("board", "style_data_conditional"), Output("board", "active_cell"),
+        Output("board", "selected_cells"),
+        Input("board", "active_cell"), Input("board", "data"),
+    )
+    def board_row(active, _):
+        """Highlight the clicked row; a new leaderboard starts with none."""
+        if not active or "board.data" in ctx.triggered_prop_ids:
+            return BOARD_STYLES, None, []
+        return [*BOARD_STYLES, {"if": {"row_index": active["row"]}, **BOARD_CLICKED_ROW}], \
+            no_update, no_update
+
     # Laps the server has answered for this session (accepted or not): not retried,
     # so a turned-down lap can't be uploaded over and over.
     tried: set[str] = set()
@@ -616,25 +610,6 @@ def create_app(
         remember(server_token=None, server_name=None)
         return version + 1
 
-    @app.callback(
-        Output("upload-status", "children"),
-        Output("server-version", "data", allow_duplicate=True),
-        Input("upload", "n_clicks"),
-        State("laps", "data"), State("laps", "selected_rows"), State("server-version", "data"),
-        prevent_initial_call=True,
-    )
-    def upload(_, rows, selected, version):
-        if not rows or not selected:
-            return html.P("Select one of your laps first.", className="muted"), no_update
-        if not server():
-            return html.P("No leaderboard server set up.", className="muted"), no_update
-        row = rows[selected[0]]
-        try:
-            result = server().upload_lap(row["path"], row["lap"])
-        except ServerError as exc:
-            return html.P(str(exc), className="note"), no_update
-        return _upload_view(result, row), version + 1
-
     # Linking traces and map happens in the browser (_SYNC_JS, in the page head):
     # moving markers and zooming must feel instant and keep the user's view.
     app.clientside_callback(ClientsideFunction("lmu", "onHover"), Output("sync-hover", "data"),
@@ -648,19 +623,6 @@ def create_app(
                             Input("reset-zoom", "n_clicks"), prevent_initial_call=True)
 
     return app
-
-
-def _upload_view(result: dict, row: dict) -> html.Div:
-    """The server's verdict on an upload, with the reasons if it was turned down."""
-    if result.get("accepted"):
-        return html.Div(className="gains", children=result.get("message", "Uploaded."))
-    # The reason already covers rule problems; list failed checks (tampering, gaps).
-    failed = [c for c in result.get("checks", []) if not c["ok"]]
-    details = [html.Li(f"{c['name']}: {c['detail']}") for c in failed]
-    return html.Div(className="note", children=[
-        html.Div(f"Lap {row['lap']} ({row['time']}): {result.get('reason', '')}"),
-        html.Ul(details) if details else None,
-    ])
 
 
 def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
