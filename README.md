@@ -3,8 +3,14 @@
 Compare your Le Mans Ultimate laps against fast reference laps, and see
 corner by corner (and straight by straight) where you lose time and why.
 
-Status: early. The ruleset format is in place. The reader for LMU's DuckDB
-recordings comes next, built against real files in [`samples/`](samples/).
+Status: early. LMU's DuckDB recordings can be read, split into laps,
+resampled by distance and compared. Corner-by-corner analysis comes next.
+
+Try it on a recording:
+
+```bash
+python scripts/compare_laps.py "samples/Algarve International Circuit_P_2026-10-30T12_56_57Z.duckdb" -o compare.html
+```
 
 ## How it fits together
 
@@ -22,6 +28,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 ```
 src/lmu_core/   analysis shared by everything (ruleset, reader, laps, comparison)
+scripts/        command-line helpers (compare_laps.py)
 src/uploader/   folder watcher + upload           (not started)
 src/server/     FastAPI leaderboard server        (not started)
 src/webapp/     Dash web app                      (not started)
@@ -38,7 +45,7 @@ python -m venv .venv
 ```
 
 ```bash
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e ".[dev,webapp]"
 ```
 
 ```bash
