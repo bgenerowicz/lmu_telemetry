@@ -26,6 +26,12 @@ where you lose time and why, with traces and a track map.
    4. **Compare against**: an expert lap (★), your own best lap, or your
       fastest time through each section (a theoretical best lap).
 
+   The comparison shows traces (time gap, speed, pedals, steering, line, gear)
+   next to a track map with both driving lines and the track edges. Hover the
+   traces to see both cars on the map; drag across the traces, or click one of
+   the "where you lose time" sections, to zoom the map to that stretch. Scroll
+   on the map to zoom, drag to move.
+
 **Save selected lap as expert lap** stores a lap in
 `Documents\LMU Lap Analyser\references`, where the app picks it up. To ship
 it with the app for everyone, copy it to [`references/`](references/) and

@@ -47,12 +47,21 @@ server, reading the same processed lap format.
    off throttle. Losses on a straight that come from a slower start are blamed
    on the exit of the corner before it.
 
+`geometry.py` draws laps on a map. Driving lines come from `Path Lateral`
+(sideways offset from LMU's track reference path, + = right), placed around a
+centre line derived once from the reference lap's GPS position. This is
+smoother than GPS (quantised to ~0.4 m) and identical across recordings; it
+matches each lap's own GPS to ~0.1 m. Track edges come from `Track Edge`
+(edge on the side the car is on), combined over the laps being compared.
+
 `library.py` finds laps: it scans a telemetry folder (metadata and lap events
 only, cached per file) and loads reference laps from `.lap.npz` folders: the
 ones bundled in `references/` and the user's own in
 `Documents/LMU Lap Analyser/references`.
 
-The app (`src/webapp`, Plotly Dash) is the UI; `src/desktop` runs it on a
+The app (`src/webapp`, Plotly Dash) is the UI. Traces and map are separate
+figures linked in the browser (hover shows both cars on the map; zooming the
+traces or clicking a finding zooms the map to that stretch); `src/desktop` runs it on a
 local port, opens the browser, remembers the telemetry folder, and offers a
 native folder picker. `.github/workflows/build-windows.yml` packages it as a
 Windows exe with PyInstaller, bundling `references/`.

@@ -35,6 +35,7 @@ CHANNELS = {
     "g_lat": ["G Force Lat"],
     "g_long": ["G Force Long"],
     "path_lateral_m": ["Path Lateral"],
+    "track_edge_m": ["Track Edge"],
 }
 EVENTS = {"gear": "Gear"}
 

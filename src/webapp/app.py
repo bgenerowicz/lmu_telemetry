@@ -10,9 +10,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from dash import Dash, Input, Output, State, dash_table, dcc, html, no_update
+from dash import (
+    ALL,
+    ClientsideFunction,
+    Dash,
+    Input,
+    Output,
+    State,
+    dash_table,
+    dcc,
+    html,
+    no_update,
+)
 
 from lmu_core.analysis import Finding, SessionAnalysis, analyse
+from lmu_core.geometry import track_geometry
 from lmu_core.library import (
     load_lap,
     load_reference,
@@ -20,7 +32,7 @@ from lmu_core.library import (
     save_reference,
     scan_folder,
 )
-from webapp.charts import comparison_figure
+from webapp.charts import map_figure, traces_figure
 
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 SELF_BEST = "self:best"
@@ -36,8 +48,11 @@ def create_app(
     on_folder_scanned: Callable[[str], None] | None = None,
     choose_folder: Callable[[str | None], str | None] | None = None,
 ) -> Dash:
-    app = Dash(__name__, title="LMU Lap Analyser", update_title=None)
-    app.index_string = _INDEX
+    # Results (graphs, findings) are created by a callback, so callbacks on them
+    # are registered before the components exist.
+    app = Dash(__name__, title="LMU Lap Analyser", update_title=None,
+               suppress_callback_exceptions=True)
+    app.index_string = _INDEX.replace("{sync_js}", _SYNC_JS)
     all_ref_dirs = [*reference_dirs, user_reference_dir]
 
     def references():
@@ -48,6 +63,9 @@ def create_app(
         children=[
             dcc.Store(id="recordings", data=[]),
             dcc.Store(id="refs-version", data=0),
+            # Outputs for the browser-side callbacks that link traces and map.
+            dcc.Store(id="sync-hover"), dcc.Store(id="sync-zoom"),
+            dcc.Store(id="sync-focus"), dcc.Store(id="sync-reset"),
             html.Header([
                 html.H1("LMU Lap Analyser"),
                 html.P("Compare your Le Mans Ultimate laps with an expert lap, corner by corner.",
@@ -277,11 +295,24 @@ def create_app(
         intro = f"Compared with {ref_label}, section by section.{note}"
         return _results_view(analysis, "you", "ref", lap_label, ref_label, intro)
 
+    # Linking traces and map happens in the browser (_SYNC_JS, in the page head):
+    # moving markers and zooming must feel instant and keep the user's view.
+    app.clientside_callback(ClientsideFunction("lmu", "onHover"), Output("sync-hover", "data"),
+                            Input("traces", "hoverData"), prevent_initial_call=True)
+    app.clientside_callback(ClientsideFunction("lmu", "onTracesZoom"), Output("sync-zoom", "data"),
+                            Input("traces", "relayoutData"), prevent_initial_call=True)
+    app.clientside_callback(ClientsideFunction("lmu", "onFocus"), Output("sync-focus", "data"),
+                            Input({"type": "focus", "index": ALL}, "n_clicks"),
+                            State("segments", "data"), prevent_initial_call=True)
+    app.clientside_callback(ClientsideFunction("lmu", "onReset"), Output("sync-reset", "data"),
+                            Input("reset-zoom", "n_clicks"), prevent_initial_call=True)
+
     return app
 
 
 def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
                   ref_label: str, intro: str) -> html.Div:
+    lap, ref = a.laps[lap_id], a.laps[ref_id]
     lap_t, ref_t = a.lap_times[lap_id], a.lap_times[ref_id]
     findings = a.findings(lap_id)
     gains = [
@@ -299,8 +330,21 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         f = findings[0]
         cards.append(("Biggest loss", f.segment.name, f"{f.time_lost_s:.3f} s"))
 
+    geometry = track_geometry(ref, list(a.laps.values()))
+    graph_config = {"displaylogo": False}
+    viz = [html.Div(className="viz-traces", children=dcc.Graph(
+        id="traces", figure=traces_figure(lap, ref, a.segments, lap_label, ref_label, geometry),
+        config=graph_config,
+    ))]
+    if geometry is not None:
+        viz.append(html.Div(className="viz-map", children=dcc.Graph(
+            id="map", figure=map_figure(geometry, lap, ref, a.segments, lap_label, ref_label),
+            config={**graph_config, "scrollZoom": True},
+        )))
+
     children = [
-        html.H2("Where you lose time"),
+        dcc.Store(id="segments", data=[[s.start_m, s.end_m] for s in a.segments]),
+        html.H2("Comparison"),
         html.P(intro, className="muted"),
         html.Div(className="cards", children=[
             html.Div(className="card", children=[
@@ -308,12 +352,20 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
                 html.Div(sub, className="muted"),
             ]) for k, v, sub in cards
         ]),
+        html.Div(className="row mt viz-help", children=[
+            html.Span("Drag across the traces to zoom in; the map follows. On the map, scroll "
+                      "to zoom and drag to move. Click a section below to jump to it.",
+                      className="muted grow-text"),
+            html.Button("Reset zoom", id="reset-zoom", className="btn"),
+        ]),
+        html.Div(id="viz", className="viz", children=viz),
+        html.H2("Where you lose time"),
     ]
     if findings:
         total = sum(f.time_lost_s for f in findings)
-        children.append(html.P(f"{total:.3f} s lost in total across {len(findings)} sections.",
-                               className="muted mt"))
-        children += [_finding_view(f) for f in findings]
+        children.append(html.P(f"{total:.3f} s lost in total across {len(findings)} sections. "
+                               "Click one to see it on the map and traces.", className="muted"))
+        children += [_finding_view(f, a.segments.index(f.segment)) for f in findings]
     else:
         children.append(html.P("Nothing significant to gain against this reference.",
                                className="note"))
@@ -323,28 +375,23 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
             + ", ".join(f"{s.name} ({g:.2f} s)" for s, g in gains[:6]) + ".",
             className="gains",
         ))
-
-    fig_ref = a.laps[ref_id]
-    children += [
-        html.H2("Compare traces"),
-        dcc.Graph(figure=comparison_figure(a.laps[lap_id], fig_ref, a.segments, lap_label,
-                                           ref_label),
-                  config={"displaylogo": False}),
-        html.H2("Sections"),
-        _sections_table(a, lap_id),
-    ]
+    children += [html.H2("Sections"), _sections_table(a, lap_id)]
     return html.Div(children)
 
 
-def _finding_view(f: Finding) -> html.Div:
-    return html.Div(className=f"finding {f.segment.kind}", children=[
-        html.Div(className="head", children=[
-            html.Span(f.segment.name, className="name"),
-            html.Span(f"{f.segment.start_m:.0f}–{f.segment.end_m:.0f} m", className="muted"),
-            html.Span(f"−{f.time_lost_s:.3f} s", className="lost"),
-        ]),
-        html.Ul([html.Li(t) for t in f.advice]),
-    ])
+def _finding_view(f: Finding, index: int) -> html.Div:
+    return html.Div(
+        id={"type": "focus", "index": index}, n_clicks=0, className=f"finding {f.segment.kind}",
+        title="Show on the map and traces",
+        children=[
+            html.Div(className="head", children=[
+                html.Span(f.segment.name, className="name"),
+                html.Span(f"{f.segment.start_m:.0f}–{f.segment.end_m:.0f} m", className="muted"),
+                html.Span(f"−{f.time_lost_s:.3f} s", className="lost"),
+            ]),
+            html.Ul([html.Li(t) for t in f.advice]),
+        ],
+    )
 
 
 def _sections_table(a: SessionAnalysis, lap_id: str) -> dash_table.DataTable:
@@ -418,6 +465,88 @@ def _fmt_recorded(value: str | None) -> str:
         return ""
     return value.replace("T", " ").replace("_", ":")[:16]
 
+_SYNC_JS = """
+window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (function () {
+  const none = () => window.dash_clientside.no_update;
+  const plot = id => document.querySelector('#' + id + ' .js-plotly-plot');
+  // _fullData has the decoded arrays; trace order matches gd.data.
+  const find = (gd, meta) => gd && gd._fullData ? gd._fullData.findIndex(t => t.meta === meta) : -1;
+  // Lap data is sampled every metre from 0, so distance d is index round(d).
+  const at = (arr, d) => Math.min(arr.length - 1, Math.max(0, Math.round(d)));
+
+  function zoomMap(d0, d1) {
+    const gd = plot('map');
+    if (!gd) return;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const meta of ['ref-line', 'lap-line']) {
+      const i = find(gd, meta);
+      if (i < 0) continue;
+      const t = gd._fullData[i];
+      for (let k = at(t.x, d0); k <= at(t.x, d1); k++) {
+        x0 = Math.min(x0, t.x[k]); x1 = Math.max(x1, t.x[k]);
+        y0 = Math.min(y0, t.y[k]); y1 = Math.max(y1, t.y[k]);
+      }
+    }
+    if (!isFinite(x0)) return;
+    const pad = Math.max(15, 0.15 * Math.max(x1 - x0, y1 - y0));
+    Plotly.relayout(gd, {'xaxis.range': [x0 - pad, x1 + pad], 'yaxis.range': [y0 - pad, y1 + pad]});
+  }
+  function resetMap() {
+    const gd = plot('map');
+    if (gd) Plotly.relayout(gd, {'xaxis.autorange': true, 'yaxis.autorange': true});
+  }
+
+  return {
+    // Hovering the traces shows where both cars are on the map.
+    onHover(hover) {
+      const gd = plot('map');
+      if (!gd || !hover || !hover.points || !hover.points.length) return none();
+      const d = hover.points[0].x, update = {x: [], y: []}, idx = [];
+      for (const [line, pos] of [['ref-line', 'ref-pos'], ['lap-line', 'lap-pos']]) {
+        const li = find(gd, line), pi = find(gd, pos);
+        if (li < 0 || pi < 0) continue;
+        const t = gd._fullData[li], k = at(t.x, d);
+        update.x.push([t.x[k]]); update.y.push([t.y[k]]); idx.push(pi);
+      }
+      if (idx.length) Plotly.restyle(gd, update, idx);
+      return none();
+    },
+    // Zooming the traces to a distance range zooms the map to the same stretch.
+    onTracesZoom(rel) {
+      if (!rel) return none();
+      let r0, r1, reset = false;
+      for (const k in rel) {
+        let m = k.match(/^xaxis\\d*\\.range\\[([01])\\]$/);
+        if (m) { if (m[1] === '0') r0 = rel[k]; else r1 = rel[k]; }
+        if (/^xaxis\\d*\\.range$/.test(k)) { r0 = rel[k][0]; r1 = rel[k][1]; }
+        if (/^xaxis\\d*\\.autorange$/.test(k)) reset = true;
+      }
+      if (r0 !== undefined && r1 !== undefined) zoomMap(r0, r1);
+      else if (reset) resetMap();
+      return none();
+    },
+    // Clicking a finding zooms traces and map to that section.
+    onFocus(clicks, segments) {
+      const ctx = window.dash_clientside.callback_context;
+      if (!ctx.triggered.length || !ctx.triggered[0].value || !segments) return none();
+      const id = JSON.parse(ctx.triggered[0].prop_id.split('.')[0]);
+      const [s0, s1] = segments[id.index];
+      const traces = plot('traces');
+      if (traces) Plotly.relayout(traces, {'xaxis.range': [s0 - 40, s1 + 40]});
+      zoomMap(s0, s1);
+      document.getElementById('viz').scrollIntoView({behavior: 'smooth', block: 'start'});
+      return none();
+    },
+    onReset() {
+      const traces = plot('traces');
+      if (traces) Plotly.relayout(traces, {'xaxis.autorange': true});
+      resetMap();
+      return none();
+    },
+  };
+})()});
+"""
+
 
 _INDEX = """<!DOCTYPE html>
 <html>
@@ -426,6 +555,7 @@ _INDEX = """<!DOCTYPE html>
 <title>{%title%}</title>
 {%favicon%}
 {%css%}
+<script>{sync_js}</script>
 <style>
   body { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1d2128;
          background: #f4f5f7; margin: 0; }
@@ -463,6 +593,13 @@ _INDEX = """<!DOCTYPE html>
   .finding .lost { margin-left: auto; font-weight: 600; color: #b42318; font-variant-numeric: tabular-nums; }
   .finding ul { margin: 4px 0 0; padding-left: 20px; }
   .gains { background: #e7f6ec; border: 1px solid #b7e1c3; padding: 8px 14px; border-radius: 8px; }
+  .viz { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; margin-top: 8px; }
+  @media (max-width: 1000px) { .viz { grid-template-columns: 1fr; } }
+  .viz-map { border-left: 1px solid #eceef2; }
+  .viz-help { justify-content: space-between; }
+  .grow-text { flex: 1; }
+  .finding { cursor: pointer; }
+  .finding:hover { background: #f8f9fb; }
   .note { background: #fff8e6; border: 1px solid #f3dc9b; padding: 10px 14px; border-radius: 8px; }
 </style>
 </head>
