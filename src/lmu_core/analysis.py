@@ -82,18 +82,30 @@ class SessionAnalysis:
         return sorted(out, key=lambda f: f.time_lost_s, reverse=True)
 
 
-def analyse(laps: dict[str, ProcessedLap]) -> SessionAnalysis:
-    """Analyse flying laps of one track and car, keyed by a display label."""
+def analyse(laps: dict[str, ProcessedLap], reference: str | None = None) -> SessionAnalysis:
+    """Analyse laps of one track and car, keyed by a display label.
+
+    Without ``reference``, each segment is compared with whichever lap was
+    fastest through it. With ``reference`` (one of the labels, e.g. an expert
+    lap), every segment is compared with that lap, and its corners define the
+    segments.
+    """
     if not laps:
         raise ValueError("no laps to analyse")
-    best = min(laps, key=lambda n: laps[n].time_s[-1])
+    if reference is not None and reference not in laps:
+        raise KeyError(f"reference {reference!r} is not one of the laps")
+    best = reference or min(laps, key=lambda n: laps[n].time_s[-1])
     ref = laps[best]
     aligned = {n: _on_grid(p, ref.distance_m) for n, p in laps.items()}
-    segments = find_segments(_median_lap(list(aligned.values())))
+    basis = [aligned[reference]] if reference else list(aligned.values())
+    segments = find_segments(_median_lap(basis))
     stats = {n: [segment_stats(p, s) for s in segments] for n, p in aligned.items()}
-    best_segment_lap = [
-        min(stats, key=lambda n: stats[n][i].time_s) for i in range(len(segments))
-    ]
+    if reference:
+        best_segment_lap = [reference] * len(segments)
+    else:
+        best_segment_lap = [
+            min(stats, key=lambda n: stats[n][i].time_s) for i in range(len(segments))
+        ]
     return SessionAnalysis(aligned, segments, stats, best, best_segment_lap)
 
 
@@ -154,9 +166,9 @@ def advise(
         return tips
 
     if lap.brake_at_m is not None and ref.brake_at_m is None:
-        tips.append("Your faster lap didn't brake here, only lifted.")
+        tips.append("The reference didn't brake here, only lifted.")
     elif lap.brake_at_m is None and ref.brake_at_m is not None:
-        tips.append(f"Your faster lap braked at {ref.brake_at_m:.0f} m; you only lifted.")
+        tips.append(f"The reference braked at {ref.brake_at_m:.0f} m; you only lifted.")
     elif lap.brake_at_m is not None and ref.brake_at_m is not None:
         _brake_tip(tips, lap, ref)
 
@@ -180,7 +192,7 @@ def advise(
         late = lap.full_throttle_at_m - ref.full_throttle_at_m
         if late >= THROTTLE_POINT_M:
             tips.append(
-                f"Full throttle {late:.0f} m later than your faster lap "
+                f"Full throttle {late:.0f} m later than the reference "
                 f"({lap.full_throttle_at_m:.0f} m vs {ref.full_throttle_at_m:.0f} m)."
             )
     exit_diff = lap.exit_kph - ref.exit_kph
@@ -199,7 +211,7 @@ def _brake_tip(tips: list[str], lap: SegmentStats, ref: SegmentStats) -> None:
     if diff <= -BRAKE_POINT_M:
         tips.append(
             f"Brake {-diff:.0f} m later: you braked at {lap.brake_at_m:.0f} m, "
-            f"your faster lap at {ref.brake_at_m:.0f} m."
+            f"the reference at {ref.brake_at_m:.0f} m."
         )
     if ref.brake_peak_pct - lap.brake_peak_pct >= 10:
         tips.append(
@@ -216,15 +228,21 @@ def _speed_summary(lap: SegmentStats, ref: SegmentStats) -> str:
 
 
 def _on_grid(lap: ProcessedLap, grid: np.ndarray) -> ProcessedLap:
+    """Put a lap on another lap's distance grid.
+
+    Track length is estimated per recording, so two recordings can differ by a
+    metre or two; the lap's distances are scaled to the grid's length.
+    """
     if len(lap.distance_m) == len(grid) and np.allclose(lap.distance_m, grid):
         return lap
-    data = {
-        k: np.interp(grid, lap.distance_m, v) for k, v in lap.data.items() if k != "distance_m"
-    }
+    d = lap.distance_m * (grid[-1] / lap.distance_m[-1])
+    data = {k: np.interp(grid, d, v) for k, v in lap.data.items() if k != "distance_m"}
     return ProcessedLap(lap.facts, {"distance_m": grid, **data})
 
 
 def _median_lap(laps: list[ProcessedLap]) -> ProcessedLap:
     """A typical lap for finding segments, less sensitive to one-off moments."""
+    if len(laps) == 1:
+        return laps[0]
     data = {k: np.median([p.data[k] for p in laps], axis=0) for k in laps[0].data}
     return ProcessedLap(laps[0].facts, data)

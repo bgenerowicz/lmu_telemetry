@@ -1,152 +1,62 @@
-"""LMU Lap Analyser: pick one or more recordings, get a report in the browser.
+"""LMU Lap Analyser: runs the web app locally and opens it in the browser.
 
-    lmu-analyser.exe                      choose recordings in a file dialog
-    lmu-analyser.exe A.duckdb B.duckdb    analyse these (also: drop files on the exe)
+    lmu-analyser.exe                 start the app (close the window to quit)
+    lmu-analyser.exe --port 8050     fixed port instead of a free one
+    lmu-analyser.exe --no-browser    don't open the browser
 
-Recordings from several sessions are combined, as long as they are the same
-track and car. The report is saved under Documents/LMU Lap Analyser.
+The telemetry folder is remembered in Documents/LMU Lap Analyser/settings.json.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import re
+import logging
+import socket
 import sys
-import traceback
+import threading
 import webbrowser
-from pathlib import Path
 
-from desktop.report import render
-from lmu_core.analysis import analyse
-from lmu_core.laps import split_laps
-from lmu_core.recording import Recording
-from lmu_core.resample import ProcessedLap, resample_lap
-
-APP_NAME = "LMU Lap Analyser"
-LMU_TELEMETRY = Path("steamapps", "common", "Le Mans Ultimate", "UserData", "Telemetry")
+from desktop import paths
+from webapp.app import create_app
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="lmu-analyser", description=APP_NAME)
-    parser.add_argument("recordings", nargs="*", help="LMU .duckdb telemetry recordings")
-    parser.add_argument("-o", "--output", help="where to write the HTML report")
-    parser.add_argument("--no-open", action="store_true", help="don't open the report")
+    parser = argparse.ArgumentParser(prog="lmu-analyser", description=paths.APP_NAME)
+    parser.add_argument("--port", type=int, default=0, help="port to serve on (default: any free)")
+    parser.add_argument("--no-browser", action="store_true", help="don't open the browser")
     args = parser.parse_args(argv)
 
-    interactive = not args.recordings
-    try:
-        paths = [Path(p) for p in args.recordings] or choose_recordings()
-        if not paths:
-            return 0
-        laps, sources = load_laps(paths)
-        print(f"Analysing {len(laps)} timed laps...")
-        page = render(analyse(laps), sources)
+    settings = paths.load_settings()
+    folder = settings.get("telemetry_dir") or str(paths.find_telemetry_dir() or "")
 
-        output = Path(args.output) if args.output else default_output(paths)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(page, encoding="utf-8")
-        print(f"Report: {output}")
-        if not args.no_open:
-            webbrowser.open(output.resolve().as_uri())
-        return 0
-    except Exception as exc:  # noqa: BLE001 - show anything to the user, not a vanishing console
-        traceback.print_exc()
-        if interactive:
-            _show_error(str(exc))
-        return 1
+    def remember(folder: str) -> None:
+        if settings.get("telemetry_dir") != folder:
+            settings["telemetry_dir"] = folder
+            paths.save_settings(settings)
 
-
-def load_laps(paths: list[Path]) -> tuple[dict[str, ProcessedLap], list[str]]:
-    """Timed laps from all recordings, labelled "3" or, with several files, "2.3"."""
-    laps: dict[str, ProcessedLap] = {}
-    key = None
-    for i, path in enumerate(paths, start=1):
-        print(f"Reading {path.name}")
-        with Recording(path) as rec:
-            this_key = (rec.metadata.get("TrackName"), rec.metadata.get("CarName"))
-            if key is None:
-                key = this_key
-            elif this_key != key:
-                raise ValueError(
-                    f"{path.name} is {this_key[0]} / {this_key[1]}, but the first recording is "
-                    f"{key[0]} / {key[1]}. Only recordings of the same track and car can be combined."
-                )
-            for lap in split_laps(rec):
-                if lap.is_flying:
-                    label = str(lap.number) if len(paths) == 1 else f"{i}.{lap.number}"
-                    laps[label] = resample_lap(rec, lap)
-    if not laps:
-        raise ValueError("No timed laps found. Out laps, in laps and unfinished laps are skipped.")
-    sources = [p.name for p in paths]
-    return laps, sources
-
-
-def find_telemetry_dir() -> Path | None:
-    """LMU's telemetry folder, looked up through Steam's library folders."""
-    env = os.environ.get("LMU_TELEMETRY_DIR")
-    if env and Path(env).is_dir():
-        return Path(env)
-    for library in _steam_libraries():
-        candidate = library / LMU_TELEMETRY
-        if candidate.is_dir():
-            return candidate
-    return None
-
-
-def _steam_libraries() -> list[Path]:
-    roots = []
-    if sys.platform == "win32":
-        try:
-            import winreg
-
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
-                roots.append(Path(winreg.QueryValueEx(k, "SteamPath")[0]))
-        except OSError:
-            pass
-        roots.append(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Steam"))
-    libraries = []
-    for root in roots:
-        libraries.append(root)
-        vdf = root / "steamapps" / "libraryfolders.vdf"
-        if vdf.is_file():
-            text = vdf.read_text(encoding="utf-8", errors="replace")
-            libraries += [Path(p.replace("\\\\", "\\")) for p in re.findall(r'"path"\s+"([^"]+)"', text)]
-    return libraries
-
-
-def choose_recordings() -> list[Path]:
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()
-    folder = find_telemetry_dir()
-    names = filedialog.askopenfilenames(
-        title=f"{APP_NAME}: choose one or more recordings (same track and car)",
-        initialdir=str(folder) if folder else None,
-        filetypes=[("LMU telemetry", "*.duckdb"), ("All files", "*.*")],
+    app = create_app(
+        reference_dirs=[paths.bundled_references_dir()],
+        user_reference_dir=paths.user_references_dir(),
+        initial_folder=folder,
+        on_folder_scanned=remember,
+        choose_folder=paths.choose_folder,
     )
-    root.destroy()
-    return [Path(n) for n in names]
+
+    port = args.port or _free_port()
+    url = f"http://127.0.0.1:{port}/"
+    print(f"{paths.APP_NAME} is running at {url}")
+    print("Keep this window open while you use it; close it to quit.")
+    if not args.no_browser:
+        threading.Timer(1.0, webbrowser.open, [url]).start()
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    app.run(host="127.0.0.1", port=port, debug=False)
+    return 0
 
 
-def default_output(paths: list[Path]) -> Path:
-    name = paths[0].stem + (f" +{len(paths) - 1}" if len(paths) > 1 else "")
-    return Path.home() / "Documents" / APP_NAME / f"{name}.html"
-
-
-def _show_error(message: str) -> None:
-    try:
-        import tkinter as tk
-        from tkinter import messagebox
-
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror(APP_NAME, message)
-        root.destroy()
-    except Exception:  # noqa: BLE001 - no display; the console has the traceback
-        pass
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 if __name__ == "__main__":

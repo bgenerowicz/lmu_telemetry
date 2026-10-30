@@ -34,3 +34,8 @@ class LapFacts:
     lap_time_s: float | None = None
     is_valid: bool | None = None
     is_flying: bool | None = None
+
+    # Who and when; not used by rulesets.
+    driver: str | None = None
+    recorded_at: str | None = None
+    lap_number: int | None = None

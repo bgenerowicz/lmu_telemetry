@@ -76,10 +76,11 @@ def test_delta_time_ends_at_lap_time_difference(rec):
     assert dt[-1] == pytest.approx(laps[2].lap_time_s - laps[3].lap_time_s, abs=0.02)
 
 
-def test_parquet_round_trip(rec, tmp_path):
+def test_save_load_round_trip(rec, tmp_path):
     processed = resample_lap(rec, split_laps(rec)[3])
-    processed.to_parquet(tmp_path / "lap.parquet")
-    loaded = ProcessedLap.from_parquet(tmp_path / "lap.parquet")
+    processed.save(tmp_path / "lap.lap.npz")
+    loaded = ProcessedLap.load(tmp_path / "lap.lap.npz")
     assert loaded.facts == processed.facts
+    assert loaded.facts.driver == "Bas Generowicz"
     assert loaded.data.keys() == processed.data.keys()
     np.testing.assert_array_equal(loaded.time_s, processed.time_s)

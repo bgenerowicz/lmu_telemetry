@@ -5,8 +5,9 @@ Laps are compared by position on track, so every channel is resampled against
 ``Lap Dist`` is only logged at 10 Hz but is smooth, so time at each grid point
 is interpolated from it, and every other channel is then read at those times.
 
-The result, a :class:`ProcessedLap`, is what gets stored and shared: one row
-per metre, with the lap's :class:`LapFacts` in the Parquet schema metadata.
+The result, a :class:`ProcessedLap`, is what gets stored and shared: one value
+per metre for each channel, plus the lap's :class:`LapFacts`, saved together
+as a compressed NumPy archive (``.lap.npz``).
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ CHANNELS = {
 EVENTS = {"gear": "Gear"}
 
 _EARTH_M_PER_DEG = 111_320.0
-_FACTS_KEY = b"lmu_telemetry.facts"
 
 
 @dataclass
@@ -54,23 +54,17 @@ class ProcessedLap:
     def time_s(self) -> np.ndarray:
         return self.data["time_s"]
 
-    # pyarrow is imported on use: the desktop report doesn't need it, and it is
-    # most of the executable's size.
-    def to_parquet(self, path: str | Path) -> None:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-
-        table = pa.table(self.data)
-        meta = {_FACTS_KEY: json.dumps(dataclasses.asdict(self.facts)).encode()}
-        pq.write_table(table.replace_schema_metadata(meta), path)
+    def save(self, path: str | Path) -> None:
+        """Save as a compressed NumPy archive (``.npz``), facts included as JSON."""
+        facts = json.dumps(dataclasses.asdict(self.facts))
+        with open(path, "wb") as f:
+            np.savez_compressed(f, _facts=np.array(facts), **self.data)
 
     @classmethod
-    def from_parquet(cls, path: str | Path) -> ProcessedLap:
-        import pyarrow.parquet as pq
-
-        table = pq.read_table(path)
-        facts = LapFacts(**json.loads(table.schema.metadata[_FACTS_KEY]))
-        return cls(facts, {name: table[name].to_numpy() for name in table.column_names})
+    def load(cls, path: str | Path) -> ProcessedLap:
+        with np.load(path, allow_pickle=False) as z:
+            facts = LapFacts(**json.loads(str(z["_facts"])))
+            return cls(facts, {k: z[k] for k in z.files if k != "_facts"})
 
 
 def track_length(rec: Recording) -> float:

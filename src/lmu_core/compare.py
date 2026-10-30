@@ -14,5 +14,7 @@ def delta_time(lap: ProcessedLap, ref: ProcessedLap) -> tuple[np.ndarray, np.nda
     slightly different track-length estimates still line up.
     """
     d = ref.distance_m
-    lap_time = np.interp(d, lap.distance_m, lap.time_s)
+    # Scale for small differences in the recordings' track-length estimates.
+    lap_d = lap.distance_m * (d[-1] / lap.distance_m[-1])
+    lap_time = np.interp(d, lap_d, lap.time_s)
     return d, lap_time - ref.time_s

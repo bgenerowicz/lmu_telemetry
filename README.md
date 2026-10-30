@@ -3,37 +3,42 @@
 Compare your Le Mans Ultimate laps against fast reference laps, and see
 corner by corner (and straight by straight) where you lose time and why.
 
-Status: early. The **LMU Lap Analyser** desktop app works on your own laps:
-pick one or more recordings and it opens a report in your browser showing,
-corner by corner and straight by straight, where each lap lost time to your
-fastest time through that section, with advice. It also shows your
-theoretical best lap and where you're least consistent.
+Status: early. **LMU Lap Analyser** is a local app: pick a track and car,
+point it at your telemetry folder, choose one of your laps and an expert lap
+to compare against, and it shows corner by corner (and straight by straight)
+where you lose time and why, with traces and a track map.
 
 ## LMU Lap Analyser (Windows)
 
 1. Download `lmu-analyser.exe`: open the latest successful
-   [Build Windows app](https://github.com/bgenerowicz/lmu_telemetry/actions/workflows/build-windows.yml) run and
-   download the `lmu-analyser-windows` artifact (you need to be signed in to
-   GitHub), or take it from a [release](https://github.com/bgenerowicz/lmu_telemetry/releases) if there is one.
+   [Build Windows app](https://github.com/bgenerowicz/lmu_telemetry/actions/workflows/build-windows.yml)
+   run and download the `lmu-analyser-windows` artifact (you need to be
+   signed in to GitHub), or take it from a
+   [release](https://github.com/bgenerowicz/lmu_telemetry/releases) if there is one.
 2. In LMU, turn on telemetry recording (Settings → Gameplay) and drive a
    session with a few timed laps.
-3. Run `lmu-analyser.exe`. It opens LMU's `UserData\Telemetry` folder (found
-   through Steam); pick one or more recordings of the same track and car. You
-   can also drop recordings onto the exe.
-4. The report opens in your browser and is saved in
-   `Documents\LMU Lap Analyser`.
+3. Run `lmu-analyser.exe`. A console window opens (keep it open; close it to
+   quit) and the app opens in your browser.
+4. In the app:
+   1. **Track and car**: from your recordings and the expert laps.
+   2. **Telemetry folder**: found through Steam if possible; otherwise
+      **Browse…** to LMU's `UserData\Telemetry`. It's remembered.
+   3. **Your lap**: your timed laps for that track and car, fastest first.
+   4. **Compare against**: an expert lap (★), your own best lap, or your
+      fastest time through each section (a theoretical best lap).
+
+**Save selected lap as expert lap** stores a lap in
+`Documents\LMU Lap Analyser\references`, where the app picks it up. To ship
+it with the app for everyone, copy it to [`references/`](references/) and
+commit it.
 
 Windows may warn about an unknown publisher, since the exe isn't signed:
 choose "More info" → "Run anyway".
 
-**Example:** [`docs/example-report.html`](docs/example-report.html) is the
-report for the Algarve sample. GitHub shows HTML as source, so download it
-(the "Download raw file" button) or open it from your clone in a browser.
-
 From source, on any OS:
 
 ```bash
-python -m desktop "samples/Algarve International Circuit_P_2026-10-30T12_56_57Z.duckdb"
+python -m desktop
 ```
 
 ## How it fits together
@@ -51,12 +56,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 ## Layout
 
 ```
-src/lmu_core/   analysis shared by everything (ruleset, reader, laps, segments, analysis)
-src/desktop/    LMU Lap Analyser: desktop app producing the HTML report
-packaging/      PyInstaller entry point (built by .github/workflows/build-windows.yml)
+src/lmu_core/   analysis shared by everything (ruleset, reader, laps, segments,
+                analysis, library of recordings and reference laps)
+src/webapp/     the Dash app: track/car, folder, laps, reference, results
+src/desktop/    launcher: settings, finding LMU's folder, runs the app locally
+references/     expert reference laps shipped with the app (.lap.npz)
+packaging/      PyInstaller entry point and exe smoke test
 src/uploader/   folder watcher + upload           (not started)
 src/server/     FastAPI leaderboard server        (not started)
-src/webapp/     Dash web app                      (not started)
 rulesets/       standard-conditions rulesets (YAML)
 samples/        raw LMU recordings for development
 docs/           architecture and format docs

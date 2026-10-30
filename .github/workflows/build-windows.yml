@@ -28,23 +28,17 @@ jobs:
       - name: Build exe
         run: >
           pyinstaller --noconfirm --onefile --name lmu-analyser --paths src
-          --collect-data plotly --exclude-module pyarrow --exclude-module pandas
+          --collect-data plotly --collect-data dash --add-data references:references
+          --exclude-module pyarrow --exclude-module pandas --exclude-module pkg_resources
           packaging/lmu-analyser.py
 
-      - name: Smoke test exe on the sample recordings
-        shell: pwsh
-        run: |
-          $files = @(Get-ChildItem samples -Filter *.duckdb | ForEach-Object { $_.FullName })
-          .\dist\lmu-analyser.exe $files[0] --no-open -o report.html
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ((Get-Item report.html).Length -lt 1MB) { throw "report too small" }
+      - name: Smoke test exe
+        run: python packaging/smoke_test.py dist/lmu-analyser.exe
 
       - uses: actions/upload-artifact@v4
         with:
           name: lmu-analyser-windows
-          path: |
-            dist/lmu-analyser.exe
-            report.html
+          path: dist/lmu-analyser.exe
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')

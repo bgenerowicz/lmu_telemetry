@@ -93,6 +93,9 @@ def lap_facts(rec: Recording, lap: Lap) -> LapFacts:
         lap_time_s=lap.lap_time_s,
         is_valid=None,
         is_flying=lap.is_flying,
+        driver=meta.get("DriverName"),
+        recorded_at=meta.get("RecordingTime"),
+        lap_number=lap.number,
     )
 
 

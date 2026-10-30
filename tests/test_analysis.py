@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from desktop.report import render
 from lmu_core.analysis import analyse
 from lmu_core.laps import split_laps
 from lmu_core.recording import Recording
@@ -66,15 +65,10 @@ def test_findings_sorted_and_positive(analysis):
         assert all(x > 0 for x in losses)
 
 
-def test_report_renders(analysis):
-    page = render(analysis, [ALGARVE.name])
-    assert "Where your best lap loses time" in page
-    assert "Theoretical best" in page
+def test_fixed_reference_compares_every_section_with_it(analysis):
+    laps = analysis.laps
+    a = analyse({"you": laps["2"], "ref": laps["3"]}, reference="ref")
+    assert a.best_segment_lap == ["ref"] * len(a.segments)
+    assert sum(f.time_lost_s for f in a.findings("you")) >= a.lap_times["you"] - a.lap_times["ref"]
+    assert a.findings("ref") == []
 
-
-def test_desktop_combines_recordings_with_labels():
-    from desktop.main import load_laps
-
-    laps, sources = load_laps([ALGARVE, ALGARVE])
-    assert sorted(laps) == ["1.1", "1.2", "1.3", "2.1", "2.2", "2.3"]
-    assert sources == [ALGARVE.name, ALGARVE.name]

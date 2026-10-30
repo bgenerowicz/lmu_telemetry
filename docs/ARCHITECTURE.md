@@ -27,10 +27,11 @@ server, reading the same processed lap format.
    next lap start gives the official time. A lap is *flying* if it has an end,
    an official time, and didn't start in the pits.
 3. **Resample by distance** (`resample.py`) onto a 1 m grid of `Lap Dist`,
-   giving the *processed lap*: Parquet with one row per metre (time, speed,
-   inputs, gear, rpm, g-forces, x/y), with the `LapFacts` as JSON in the
-   Parquet schema metadata. This is what gets uploaded and shared. Resampled
-   lap times match the official ones to within 0.01 s.
+   giving the *processed lap*: one value per metre for time, speed, inputs,
+   gear, rpm, g-forces and x/y, plus the `LapFacts`, saved as a compressed
+   NumPy archive (`.lap.npz`, ~350 KB). This is what gets shared as a
+   reference lap and, later, uploaded. Resampled lap times match the official
+   ones to within 0.01 s.
 4. **Segment** (`segments.py`) the track into corners and straights. Every
    clear dip in speed (at least 8 km/h) is a corner, running from the speed
    peak before it to the end of the curve after the slowest point (from the
@@ -38,15 +39,23 @@ server, reading the same processed lap format.
    found from the median of the session's laps, so one-off moments don't
    create or hide corners. Later: store them per track on the server, editable.
 5. **Compare** (`compare.py`, `analysis.py`): `Δt(d) = t_lap(d) − t_ref(d)`.
-   Without a faster driver, the reference for each segment is the driver's own
-   fastest lap through it; adding those up gives the theoretical best lap.
+   The reference is either one lap (an expert lap, whose corners then define
+   the segments) or, per segment, the driver's own fastest lap through it;
+   adding those up gives the theoretical best lap.
 6. **Advise** (`analysis.py`) from per-segment metrics: braking point and
    peak pressure, entry, minimum and exit speed, full-throttle point, metres
    off throttle. Losses on a straight that come from a slower start are blamed
    on the exit of the corner before it.
 
-The desktop app (`src/desktop`) renders this as a self-contained HTML report
-and is packaged as a Windows exe by `.github/workflows/build-windows.yml`.
+`library.py` finds laps: it scans a telemetry folder (metadata and lap events
+only, cached per file) and loads reference laps from `.lap.npz` folders: the
+ones bundled in `references/` and the user's own in
+`Documents/LMU Lap Analyser/references`.
+
+The app (`src/webapp`, Plotly Dash) is the UI; `src/desktop` runs it on a
+local port, opens the browser, remembers the telemetry folder, and offers a
+native folder picker. `.github/workflows/build-windows.yml` packages it as a
+Windows exe with PyInstaller, bundling `references/`.
 
 ## What the recordings contain
 
@@ -75,3 +84,8 @@ Checked against `samples/` (LMU, October 2026):
 - **Game version:** not in the recording; the uploader could read it from the
   LMU install.
 - **Tyre compound:** only an index (`TyresCompound` 0..n) is recorded.
+- **Car model:** only the entry name is recorded (`CarName`, e.g.
+  "Garage 59 2026 #10:LM"), not the model, so expert laps match on the exact
+  entry name; other cars in the same class are offered as "other car".
+- **Corner names:** detected per reference, so numbering can differ between
+  references. A fixed, editable corner list per track would fix this.
