@@ -108,6 +108,9 @@ class Ruleset(BaseModel):
     description: str = ""
     top_n: int = Field(default=10, ge=1)
     leaderboard_key: list[str] = ["track", "layout", "car", "game_version"]
+    # Keep top_n per value of these fields within a leaderboard (e.g. [car]: top N per
+    # car on a class leaderboard) instead of top_n for the whole leaderboard.
+    top_n_per: list[str] = []
     on_unknown: OnUnknown = "warn"
     rules: dict[str, Rule] = {}
 
@@ -120,6 +123,14 @@ class Ruleset(BaseModel):
         if not key:
             raise ValueError("leaderboard_key must not be empty")
         return key
+
+    @field_validator("top_n_per")
+    @classmethod
+    def _per_fields_exist(cls, per: list[str]) -> list[str]:
+        unknown = [k for k in per if k not in LAP_FIELDS]
+        if unknown:
+            raise ValueError(f"unknown top_n_per fields: {unknown}")
+        return per
 
     @field_validator("rules")
     @classmethod

@@ -60,6 +60,10 @@ class ServerClient:
     def leaderboard(self, track: str, car: str) -> list[dict]:
         return self._get("/api/leaderboard", track=track, car=car)
 
+    def class_leaderboard(self, track: str, car_class: str) -> list[dict]:
+        """Every car of a class at a track, fastest first."""
+        return self._get("/api/leaderboard", track=track, car_class=car_class)
+
     def download_lap(self, lap_id: str, cache_dir: Path) -> Path:
         """The processed lap, from the local cache or the server."""
         path = Path(cache_dir) / f"{lap_id}.lap.npz"

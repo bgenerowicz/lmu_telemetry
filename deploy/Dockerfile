@@ -9,7 +9,7 @@ COPY rulesets ./rulesets
 RUN pip install --no-cache-dir ".[server]"
 
 ENV LMU_DATA_DIR=/data \
-    LMU_RULESET=/app/rulesets/loose-v1.yaml
+    LMU_RULESET=/app/rulesets/loose-v2.yaml
 VOLUME /data
 EXPOSE 8000
 USER 1000:1000

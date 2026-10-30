@@ -73,10 +73,10 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
     [key] = [k for k in app.callback_map if "board.data" in k]
     board = app.callback_map[key]["callback"].__wrapped__
-    rows, style, note = board("Algarve International Circuit", "Garage 59 2026 #10:LM", 0)
-    assert [(r["rank"], r["driver"]) for r in rows] == [(1, "Alice")]
-    assert style == {} and "Top laps" in str(note)
-    rows, style, note = board("Algarve International Circuit", "Some other car", 0)
+    rows, style, note = board("Algarve International Circuit", "Garage 59 2026 #10:LM", [], 0)
+    assert [(r["rank"], r["driver"], r["selected"]) for r in rows] == [(1, "Alice", 1)]
+    assert style == {} and "GT3 at Algarve" in str(note)
+    rows, style, note = board("Algarve International Circuit", "Some other car", [], 0)
     assert rows == [] and "No laps" in str(note)
 
 

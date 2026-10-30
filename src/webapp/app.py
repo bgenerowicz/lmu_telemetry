@@ -86,6 +86,14 @@ def create_app(
         except ServerError:
             return []
 
+    def class_of(track: str, car: str, recordings: list[dict]) -> str | None:
+        """A car's class, from expert laps, the user's recordings or the leaderboards."""
+        return next((r.car_class for r in references() if r.car == car and r.car_class), None) \
+            or next((r["car_class"] for r in recordings
+                     if r["track"] == track and r["car"] == car and r["car_class"]), None) \
+            or next((b["car_class"] for b in server_boards()
+                     if b["track"] == track and b["car"] == car and b["car_class"]), None)
+
     # Results (graphs, findings) are created by a callback, so callbacks on them
     # are registered before the components exist.
     app = Dash(__name__, title="LMU Lap Analyser", update_title=None,
@@ -142,10 +150,11 @@ def create_app(
                 html.Div(id="board-note", className="mt"),
                 html.Div(id="board-wrap", className="mt", children=[
                     dash_table.DataTable(
-                        id="board", page_size=10,
+                        id="board", page_size=15,
                         columns=[
                             {"name": "#", "id": "rank"},
                             {"name": "Driver", "id": "driver"},
+                            {"name": "Car", "id": "car"},
                             {"name": "Time", "id": "time"},
                             {"name": "Gap", "id": "gap"},
                             {"name": "Recorded", "id": "recorded"},
@@ -154,6 +163,11 @@ def create_app(
                         style_cell={"fontFamily": FONT, "fontSize": 14, "padding": "6px 10px",
                                     "textAlign": "left"},
                         style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
+                        # The selected car's laps stand out on the class leaderboard.
+                        style_data_conditional=[
+                            {"if": {"filter_query": "{selected} = 1"},
+                             "backgroundColor": "#eef3fd", "fontWeight": 600},
+                        ],
                     ),
                 ]),
             ]),
@@ -295,9 +309,7 @@ def create_app(
         refs = sorted((r for r in references() if r.track == track), key=lambda r: r.lap_time_s)
         same = [r for r in refs if r.car == car]
         boards = [b for b in server_boards() if b["track"] == track]
-        car_class = next((r.car_class for r in same), None) or next(
-            (r["car_class"] for r in recordings if r["track"] == track and r["car"] == car), None
-        ) or next((b["car_class"] for b in boards if b["car"] == car), None)
+        car_class = class_of(track, car, recordings)
         other = [r for r in refs if r.car != car and car_class and r.car_class == car_class]
         # Other cars of the same class: their fastest online lap each.
         other_online = []
@@ -458,26 +470,36 @@ def create_app(
 
     @app.callback(
         Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),
-        Input("track", "value"), Input("car", "value"), Input("server-version", "data"),
+        Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
+        Input("server-version", "data"),
     )
-    def board(track, car, _):
+    def board(track, car, recordings, _):
+        """The leaderboard for the car's class at this track (or just the car's, if its
+        class is unknown), with the selected car's laps highlighted."""
         hide = {"display": "none"}
         if not server() or not track or not car:
             return [], hide, ""
+        car_class = class_of(track, car, recordings)
         try:
-            entries = server().leaderboard(track, car)
+            entries = (server().class_leaderboard(track, car_class) if car_class
+                       else server().leaderboard(track, car))
         except ServerError as exc:
             return [], hide, html.Span(f"Couldn't load the leaderboard: {exc}", className="muted")
         if not entries:
-            return [], hide, html.Span("No laps on the leaderboard for this track and car yet.",
+            what = f"{car_class} cars" if car_class else "this car"
+            return [], hide, html.Span(f"No laps on the leaderboard for {what} at this track yet.",
                                        className="muted")
         best = entries[0]["lap_time_s"]
         rows = [{
-            "rank": e["rank"], "driver": e["driver"], "time": _fmt_time(e["lap_time_s"]),
+            "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
+            "time": _fmt_time(e["lap_time_s"]),
             "gap": "" if i == 0 else f"+{e['lap_time_s'] - best:.3f}",
             "recorded": _fmt_recorded(e["recorded_at"]),
+            "selected": int(e.get("car", car) == car),
         } for i, e in enumerate(entries)]
-        return rows, {}, html.B(f"Top laps: {track} · {car}")
+        title = f"{car_class} at {track}: each car's top drivers" if car_class else \
+            f"Top laps: {track} · {car}"
+        return rows, {}, html.B(title)
 
     @app.callback(
         Output("server-version", "data", allow_duplicate=True),

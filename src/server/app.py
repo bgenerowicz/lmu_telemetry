@@ -39,6 +39,8 @@ from server.config import Settings
 
 # Track length is checked against earlier accepted laps once there are this many.
 KNOWN_LENGTH_MIN_LAPS = 3
+# Lap fields stored as columns, which leaderboards can be keyed by.
+STORED_FIELDS = {"track", "layout", "car", "car_class"}
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -49,6 +51,10 @@ def create_app(
     settings = settings or Settings.from_env()
     db.init(settings.data_dir)
     ruleset = Ruleset.load(settings.ruleset_path)
+    unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
+    if unstored:
+        raise ValueError(f"ruleset {ruleset.id}: laps don't store {sorted(unstored)}, "
+                         "so the server can't build leaderboards by them")
     callback_url = f"{settings.public_url}/auth/steam/callback"
     app = FastAPI(title="LMU Lap Analyser server", docs_url="/api/docs", redoc_url=None)
 
@@ -155,14 +161,17 @@ def create_app(
         return [dict(r) for r in rows]
 
     @app.get("/api/leaderboard")
-    def leaderboard(track: str, car: str, layout: str | None = None, con=Depends(get_con)):
+    def leaderboard(track: str, car: str | None = None, car_class: str | None = None,
+                    layout: str | None = None, con=Depends(get_con)):
+        """Laps at a track, fastest first: one car's, one class's, or all."""
         rows = con.execute(
             "SELECT laps.id, users.name AS driver, laps.driver_name, laps.lap_time_s, "
-            "laps.car_class, laps.recorded_at, laps.uploaded_at FROM laps "
-            "JOIN users ON users.id = laps.user_id "
-            "WHERE ruleset_id = ? AND track = ? AND car = ? AND (? IS NULL OR layout = ?) "
+            "laps.car, laps.car_class, laps.layout, laps.recorded_at, laps.uploaded_at "
+            "FROM laps JOIN users ON users.id = laps.user_id "
+            "WHERE ruleset_id = ? AND track = ? AND (? IS NULL OR car = ?) "
+            "AND (? IS NULL OR car_class = ?) AND (? IS NULL OR layout = ?) "
             "AND users.banned = 0 ORDER BY lap_time_s",
-            (ruleset.id, track, car, layout, layout),
+            (ruleset.id, track, car, car, car_class, car_class, layout, layout),
         ).fetchall()
         return [{"rank": i, **dict(r)} for i, r in enumerate(rows, start=1)]
 
@@ -268,8 +277,15 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         reasons = [_rule_reason(r, limits) for r in report.problems if r.rejects]
         return 422, _rejected("Not added: " + "; ".join(reasons) + ".", checks=checks, rules=rules)
 
-    key = (ruleset.id, f.track, f.layout, f.car)
-    board = "ruleset_id = ? AND track = ? AND layout IS ? AND car = ?"
+    # The laps competing for top_n places: the leaderboard, or one car on it
+    # (top_n_per). Each driver keeps one lap there.
+    def where(fields: list[str]) -> tuple[str, tuple]:
+        sql = " AND ".join(["ruleset_id = ?", *(f"{c} IS ?" for c in fields)])
+        return sql, (ruleset.id, *(getattr(f, c) for c in fields))
+
+    board, key = where([*ruleset.leaderboard_key, *ruleset.top_n_per])
+    whole_board, whole_key = where(ruleset.leaderboard_key)
+    within = f" in the {f.car}" if "car" in ruleset.top_n_per else ""
     con.execute("BEGIN IMMEDIATE")
     try:
         own = con.execute(f"SELECT id, lap_time_s FROM laps WHERE {board} AND user_id = ?",
@@ -277,7 +293,7 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         if own and own["lap_time_s"] <= f.lap_time_s:
             con.execute("ROLLBACK")
             return 200, _rejected(
-                f"You already have a faster lap here ({_fmt_time(own['lap_time_s'])}).",
+                f"You already have a faster lap here{within} ({_fmt_time(own['lap_time_s'])}).",
                 checks=checks, rules=rules)
         faster = con.execute(
             f"SELECT COUNT(*) FROM laps WHERE {board} AND user_id != ? AND lap_time_s < ?",
@@ -286,8 +302,11 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         if rank > ruleset.top_n:
             con.execute("ROLLBACK")
             return 200, _rejected(
-                f"Not fast enough for the top {ruleset.top_n} (it would be #{rank}).",
+                f"Not fast enough for the top {ruleset.top_n}{within} (it would be #{rank}).",
                 checks=checks, rules=rules)
+        overall = 1 + con.execute(
+            f"SELECT COUNT(*) FROM laps WHERE {whole_board} AND id != ? AND lap_time_s < ?",
+            (*whole_key, own["id"] if own else "", f.lap_time_s)).fetchone()[0]
 
         lap_id = uuid.uuid4().hex
         raw, processed = db.lap_files(settings.data_dir, lap_id)
@@ -312,9 +331,13 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         raise
     for old in removed + pushed_out:
         _delete_lap_files(settings.data_dir, old)
+    overall_note = ""
+    if ruleset.top_n_per:
+        overall_note = f" (#{overall} overall" + (f" in {f.car_class})" if f.car_class else ")")
     return 201, {
-        "accepted": True, "lap_id": lap_id, "rank": rank, "lap_time_s": f.lap_time_s,
-        "message": f"Accepted: #{rank} on {f.track} in the {f.car}.",
+        "accepted": True, "lap_id": lap_id, "rank": rank, "overall_rank": overall,
+        "lap_time_s": f.lap_time_s,
+        "message": f"Accepted: #{rank} on {f.track} in the {f.car}{overall_note}.",
         "checks": checks, "rules": rules,
     }
 

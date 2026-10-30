@@ -243,6 +243,7 @@ def test_admin_import_lap_for_a_driver_without_an_account(tmp_path, extracts, mo
     for n in (1, 3):
         (tmp_path / f"lap{n}.duckdb.gz").write_bytes(extracts[n])
     monkeypatch.setenv("LMU_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("LMU_RULESET", str(settings.ruleset_path))
     files = [str(tmp_path / "lap1.duckdb.gz"), str(tmp_path / "lap3.duckdb.gz")]
     assert admin.main(["import-lap", "--as", "Daniel", *files]) == 0
     [board] = client.get("/api/leaderboards").json()
@@ -253,3 +254,49 @@ def test_admin_import_lap_for_a_driver_without_an_account(tmp_path, extracts, mo
     assert admin.main(["import-lap", "--as", "Daniel", files[1]]) == 0
     assert len(client.get("/api/leaderboard", params={"track": board["track"],
                                                       "car": board["car"]}).json()) == 1
+
+
+def as_car(extract: bytes, car: str) -> bytes:
+    """The same lap extract, recorded in another car (for class leaderboards)."""
+    import tempfile
+
+    import duckdb
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "lap.duckdb"
+        path.write_bytes(gzip.decompress(extract))
+        con = duckdb.connect(str(path))
+        con.execute("UPDATE metadata SET value = ? WHERE key = 'CarName'", [car])
+        con.close()
+        return gzip.compress(path.read_bytes())
+
+
+def test_class_leaderboard_keeps_top_n_per_car(tmp_path, extracts):
+    ruleset = tmp_path / "class.yaml"
+    ruleset.write_text((ROOT / "rulesets" / "loose-v2.yaml").read_text().replace(
+        "top_n: 3", "top_n: 1"))
+    client, _ = make_client(tmp_path, ruleset=ruleset)
+    alice, bob, carol = (sign_in(client, n) for n in ("Alice", "Bob", "Carol"))
+    mclaren, ford = "Garage 59 2026 #10:LM", "Proton Competition 2026 #88:LM"
+
+    assert upload(client, alice, extracts[2]).json()["rank"] == 1
+    # A faster lap in another GT3: #1 for that car, and #1 overall in GT3.
+    r = upload(client, bob, as_car(extracts[3], ford)).json()
+    assert (r["rank"], r["overall_rank"]) == (1, 1) and "#1 overall in GT3" in r["message"]
+    # Top 1 per car: Carol's faster McLaren lap pushes out Alice's, not Bob's Ford.
+    assert upload(client, carol, extracts[3]).json()["rank"] == 1
+    board = client.get("/api/leaderboard", params={
+        "track": "Algarve International Circuit", "car_class": "GT3"}).json()
+    # (Same lap, same time: their order is a tie.)
+    assert sorted((e["driver"], e["car"]) for e in board) == [("Bob", ford), ("Carol", mclaren)]
+    # Drivers keep a lap per car, so Carol's Ford lap competes with Bob's for that car.
+    r = upload(client, carol, as_car(extracts[2], ford)).json()
+    assert r["reason"] == "Not fast enough for the top 1 in the " + ford + " (it would be #2)."
+
+
+def test_ruleset_must_key_leaderboards_by_stored_fields(tmp_path):
+    ruleset = tmp_path / "bad.yaml"
+    ruleset.write_text((ROOT / "rulesets" / "loose-v2.yaml").read_text().replace(
+        "top_n_per: [car]", "top_n_per: [weather]"))
+    with pytest.raises(ValueError, match="weather"):
+        make_client(tmp_path, ruleset=ruleset)

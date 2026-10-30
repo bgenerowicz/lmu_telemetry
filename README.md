@@ -32,12 +32,14 @@ where you lose time and why, with traces and a track map.
    the "where you lose time" sections, to zoom the map to that stretch. Scroll
    on the map to zoom, drag to move.
 
-**Online leaderboard**: enter the server's address, **Sign in with Steam**,
-and **Upload selected lap to the leaderboard**. The server checks the lap
-itself (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#uploads)) and keeps
-each driver's best lap, top 10 per track and car, under the current
-[ruleset](rulesets/loose-v1.yaml). Laps on the leaderboard appear under
-**Compare against** as "(online)".
+**Online leaderboard**: anyone can see it; to add your laps, **Sign in with
+Steam** and **Upload selected lap to the leaderboard**. The server checks the
+lap itself (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#uploads)) and
+keeps one leaderboard per class (e.g. GT3) at each track, with each car's top 3
+drivers (each driver's best lap in that car), under the current
+[ruleset](rulesets/loose-v2.yaml). Laps on the leaderboard appear under
+**Compare against** as "(online)"; other cars of the same class come with a
+warning.
 
 **Save selected lap as expert lap** stores a lap in
 `Documents\LMU Lap Analyser\references`, where the app picks it up. To ship
