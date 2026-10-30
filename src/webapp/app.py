@@ -294,10 +294,20 @@ def create_app(
                 online_note = f" Online leaderboard: {exc}"
         refs = sorted((r for r in references() if r.track == track), key=lambda r: r.lap_time_s)
         same = [r for r in refs if r.car == car]
+        boards = [b for b in server_boards() if b["track"] == track]
         car_class = next((r.car_class for r in same), None) or next(
             (r["car_class"] for r in recordings if r["track"] == track and r["car"] == car), None
-        )
+        ) or next((b["car_class"] for b in boards if b["car"] == car), None)
         other = [r for r in refs if r.car != car and car_class and r.car_class == car_class]
+        # Other cars of the same class: their fastest online lap each.
+        other_online = []
+        for b in boards:
+            if b["car"] != car and car_class and b["car_class"] == car_class:
+                try:
+                    other_online += [(b["car"], e) for e in server().leaderboard(track, b["car"])[:1]]
+                except ServerError:
+                    pass
+        other_online.sort(key=lambda x: x[1]["lap_time_s"])
         options = [
             {"label": f"#{e['rank']} {e['driver']} · {_fmt_time(e['lap_time_s'])} (online)",
              "value": f"srv:{e['id']}"}
@@ -309,6 +319,11 @@ def create_app(
             {"label": f"{r.driver or 'Unknown'} · {_fmt_time(r.lap_time_s)} · other car: {r.car}",
              "value": f"ref:{r.path}"}
             for r in other
+        ] + [
+            {"label": f"#{e['rank']} {e['driver']} · {_fmt_time(e['lap_time_s'])} · other car: "
+                      f"{other_car} (online)",
+             "value": f"srv:{e['id']}"}
+            for other_car, e in other_online
         ]
         mine = _my_laps(recordings, track, car)
         if mine:
@@ -381,11 +396,14 @@ def create_app(
             return html.P("This lap is the reference itself. Pick another of your laps, or "
                           "compare against your fastest time in each section.", className="note")
         analysis = analyse({"you": lap, "ref": ref}, reference="ref")
-        note = ""
+        warning = ""
         if ref.facts.car != lap.facts.car:
-            note = f" Note: the reference is a different car ({ref.facts.car})."
-        intro = f"Compared with {ref_label}, section by section.{note}"
-        return _results_view(analysis, "you", "ref", lap_label, ref_label, intro)
+            same_class = f" (both {lap.facts.car_class})" if lap.facts.car_class else ""
+            warning = (f"Different car: the reference is the {ref.facts.car}, yours is the "
+                       f"{lap.facts.car}{same_class}. Part of the gap may be the car, not "
+                       "the driving.")
+        intro = f"Compared with {ref_label}, section by section."
+        return _results_view(analysis, "you", "ref", lap_label, ref_label, intro, warning)
 
     # --- Online leaderboard ----------------------------------------------------
 
@@ -518,7 +536,7 @@ def _upload_view(result: dict, row: dict) -> html.Div:
 
 
 def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
-                  ref_label: str, intro: str) -> html.Div:
+                  ref_label: str, intro: str, warning: str = "") -> html.Div:
     lap, ref = a.laps[lap_id], a.laps[ref_id]
     lap_t, ref_t = a.lap_times[lap_id], a.lap_times[ref_id]
     findings = a.findings(lap_id)
@@ -555,6 +573,7 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         dcc.Store(id="segments", data=[[s.start_m, s.end_m] for s in a.segments]),
         html.H2("Comparison"),
         html.P(intro, className="muted"),
+        *([html.P(warning, className="note")] if warning else []),
         html.Div(className="cards", children=[
             html.Div(className="card", children=[
                 html.Div(k, className="label"), html.Div(v, className="value"),

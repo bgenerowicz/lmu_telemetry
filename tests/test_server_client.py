@@ -80,6 +80,23 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     assert rows == [] and "No laps" in str(note)
 
 
+def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path):
+    from webapp.app import create_app as create_webapp
+
+    ServerClient(server_url, token_for(server_url, "Alice")).upload_lap(ALGARVE, 3)
+    app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
+    options = app.callback_map["..reference.options...reference.value...reference-empty.children.."]
+    track = "Algarve International Circuit"
+    mine = [{"track": track, "car": "Another GT3 #1", "car_class": "GT3", "laps": []}]
+    labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
+                                                                  mine, 0, 0, None)[0]]
+    assert any("Alice" in l and "other car: Garage 59 2026 #10:LM" in l for l in labels)
+    other_class = [{**mine[0], "car_class": "Hypercar"}]
+    labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
+                                                                  other_class, 0, 0, None)[0]]
+    assert labels == []
+
+
 def test_errors_are_readable(server_url):
     with pytest.raises(ServerError, match="Sign in"):
         ServerClient(server_url).upload_lap(ALGARVE, 3)
