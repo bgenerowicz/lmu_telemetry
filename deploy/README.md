@@ -64,6 +64,12 @@ docker compose exec lmu-server python -m server.admin delete-lap LAP_ID
 docker compose exec lmu-server python -m server.admin ban STEAM_ID
 ```
 
+Names come from Steam at sign-in (the Web API with `STEAM_API_KEY`, otherwise
+the public profile page). To pick up name changes without waiting for sign-in:
+```bash
+docker compose exec lmu-server python -m server.admin refresh-names
+```
+
 To add laps for a driver who sent their telemetry instead of uploading (same
 checks as an upload, shown under NAME, no Steam account), copy lap extracts
 into `data/import/` and (`sh -c` so the `*` is expanded inside the container):

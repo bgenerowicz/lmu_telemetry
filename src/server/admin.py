@@ -7,6 +7,7 @@
     python -m server.admin unban STEAM_ID
     python -m server.admin make-admin STEAM_ID
     python -m server.admin import-lap --as NAME EXTRACT...
+    python -m server.admin refresh-names      (Steam display names, for all users)
 
 In Docker: docker compose exec lmu-server python -m server.admin users
 
@@ -23,7 +24,7 @@ import sys
 from types import SimpleNamespace
 
 from lmu_core.ruleset import Ruleset
-from server import db
+from server import db, steam
 from server.app import _delete_lap_files, _process_upload
 from server.config import Settings
 
@@ -35,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="server.admin")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("users")
+    sub.add_parser("refresh-names")
     laps = sub.add_parser("laps")
     laps.add_argument("--track")
     for name in ("delete-lap", "ban", "unban", "make-admin"):
@@ -59,6 +61,13 @@ def main(argv: list[str] | None = None) -> int:
                 (args.track, args.track),
             ):
                 print(f"{lap['id']}  {lap['track']} / {lap['car']}  {lap['lap_time_s']:.3f}  {lap['name']}")
+        elif args.command == "refresh-names":
+            for u in con.execute("SELECT * FROM users WHERE steam_id NOT LIKE ?",
+                                 (IMPORTED_PREFIX + "%",)).fetchall():
+                name = steam.display_name(u["steam_id"], settings.steam_api_key)
+                if name and name != u["name"]:
+                    con.execute("UPDATE users SET name = ? WHERE id = ?", (name, u["id"]))
+                print(f"{u['steam_id']}  {u['name']} -> {name or '(unchanged)'}")
         elif args.command == "delete-lap":
             _delete_lap_files(settings.data_dir, args.target)
             n = con.execute("DELETE FROM laps WHERE id = ?", (args.target,)).rowcount

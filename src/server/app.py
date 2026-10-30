@@ -47,6 +47,7 @@ _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 def create_app(
     settings: Settings | None = None,
     steam_verify: Callable[[dict[str, str], str], str | None] = steam.verify,
+    steam_name: Callable[[str, str | None], str | None] = steam.display_name,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     db.init(settings.data_dir)
@@ -96,7 +97,7 @@ def create_app(
             raise HTTPException(403, "Steam could not confirm the sign-in. Try again.")
         if not db.use_nonce(con, params.get("openid.response_nonce", "")):
             raise HTTPException(403, "This sign-in link was already used. Sign in again.")
-        name = steam.display_name(steam_id, settings.steam_api_key)
+        name = steam_name(steam_id, settings.steam_api_key)
         return _signed_in(con, steam_id, name, return_to)
 
     if settings.dev_login:

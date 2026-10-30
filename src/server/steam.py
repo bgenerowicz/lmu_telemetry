@@ -50,14 +50,33 @@ def verify(params: dict[str, str], expected_return_to: str) -> str | None:
 
 
 def display_name(steam_id: str, api_key: str | None) -> str | None:
-    if not api_key:
-        return None
+    """The user's Steam display name: from the Web API with a key, otherwise from
+    the public profile page (which gives the name even for private profiles)."""
+    if api_key:
+        try:
+            r = httpx.get(
+                "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
+                params={"key": api_key, "steamids": steam_id}, timeout=10,
+            )
+            players = r.json()["response"]["players"]
+            if players:
+                return players[0]["personaname"]
+        except (httpx.HTTPError, KeyError, ValueError, IndexError):
+            pass
     try:
-        r = httpx.get(
-            "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
-            params={"key": api_key, "steamids": steam_id}, timeout=10,
-        )
-        players = r.json()["response"]["players"]
-        return players[0]["personaname"] if players else None
-    except (httpx.HTTPError, KeyError, ValueError, IndexError):
+        r = httpx.get(f"https://steamcommunity.com/profiles/{steam_id}/",
+                      params={"xml": 1}, timeout=10)
+    except httpx.HTTPError:
         return None
+    return profile_name(r.text)
+
+
+_PROFILE_NAME = re.compile(r"<steamID><!\[CDATA\[(.*?)\]\]></steamID>", re.S)
+
+
+def profile_name(xml: str) -> str | None:
+    """The name in a profile's ``?xml=1`` page (read with a regex: no XML parser
+    on a page from elsewhere)."""
+    match = _PROFILE_NAME.search(xml)
+    name = match.group(1).strip()[:64] if match else ""
+    return name or None

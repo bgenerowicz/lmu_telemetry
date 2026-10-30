@@ -32,13 +32,16 @@ def extracts(tmp_path_factory):
     return {n: extract_lap(ALGARVE, n, d / f"lap{n}.duckdb.gz").read_bytes() for n in (1, 2, 3)}
 
 
-def make_client(tmp_path, ruleset="loose-v1.yaml", steam_verify=None, **overrides):
+def make_client(tmp_path, ruleset="loose-v1.yaml", steam_verify=None,
+                steam_name=lambda steam_id, key: None, **overrides):
     settings = Settings(
         data_dir=tmp_path / "data", public_url="https://lmu.example.com",
         ruleset_path=ROOT / "rulesets" / ruleset, dev_login=True, **overrides,
     )
+    # No requests to Steam from tests: names come from steam_name.
     kwargs = {"steam_verify": steam_verify} if steam_verify else {}
-    return TestClient(create_app(settings, **kwargs), follow_redirects=False), settings
+    app = create_app(settings, steam_name=steam_name, **kwargs)
+    return TestClient(app, follow_redirects=False), settings
 
 
 def sign_in(client, name):
@@ -90,14 +93,15 @@ def test_steam_callback_signs_in_once(tmp_path):
         seen.append(expected)
         return "76561198000000001" if params.get("openid.sig") == "good" else None
 
-    client, _ = make_client(tmp_path, steam_verify=fake_verify)
+    client, _ = make_client(tmp_path, steam_verify=fake_verify,
+                            steam_name=lambda steam_id, key: "Stazzle")
     params = {"openid.sig": "good", "openid.response_nonce": "n1",
               "return_to": "http://127.0.0.1:5000/cb"}
     r = client.get("/auth/steam/callback", params=params)
     assert r.status_code in (302, 307)
     token = parse_qs(urlparse(r.headers["location"]).query)["token"][0]
     me = client.get("/api/me", headers={"Authorization": f"Bearer {token}"}).json()
-    assert me["steam_id"] == "76561198000000001"
+    assert me["steam_id"] == "76561198000000001" and me["name"] == "Stazzle"
     assert seen == ["https://lmu.example.com/auth/steam/callback"]
     # The same assertion can't be replayed, and a bad one is refused.
     assert client.get("/auth/steam/callback", params=params).status_code == 403
@@ -321,3 +325,22 @@ def test_leaderboard_marks_your_own_laps(tmp_path, extracts):
     assert [e["mine"] for e in client.get("/api/leaderboard", params=params,
                                           headers=bob).json()] == [False]
     assert [e["mine"] for e in client.get("/api/leaderboard", params=params).json()] == [False]
+
+
+def test_steam_profile_name():
+    from server.steam import profile_name
+
+    assert profile_name("<profile><steamID><![CDATA[Stazzle]]></steamID></profile>") == "Stazzle"
+    assert profile_name("<steamID><![CDATA[  ]]></steamID>") is None
+    assert profile_name("<html>Steam is down</html>") is None
+
+
+def test_admin_refresh_names(tmp_path, monkeypatch):
+    from server import admin, steam
+
+    client, settings = make_client(tmp_path)
+    alice = sign_in(client, "Alice")
+    monkeypatch.setenv("LMU_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setattr(steam, "display_name", lambda steam_id, key: "Stazzle")
+    assert admin.main(["refresh-names"]) == 0
+    assert client.get("/api/me", headers=alice).json()["name"] == "Stazzle"
