@@ -17,9 +17,14 @@ from here):
 
 ## One-time setup
 
-1. On the VPS:
+1. The repository is private and the VPS has no access to GitHub, so copy
+   the code from a checkout of `main` (`core.autocrlf=false` keeps Windows
+   line endings out):
    ```bash
-   git clone https://github.com/bgenerowicz/lmu_telemetry.git ~/lmu-telemetry
+   git -c core.autocrlf=false archive main | ssh debian@vps-534a6b72.vps.ovh.net 'mkdir -p ~/lmu-telemetry && tar -x -C ~/lmu-telemetry'
+   ```
+   Then on the VPS:
+   ```bash
    cd ~/lmu-telemetry/deploy
    cp .env.example .env    # then edit: STEAM_API_KEY (optional)
    mkdir -p data           # the container runs as 1000:1000, which is debian
@@ -40,11 +45,15 @@ from here):
 
 ## Updating
 
+From the checkout of `main`, copy the code over again and rebuild (this
+keeps `deploy/.env` and `deploy/data/`):
 ```bash
-cd ~/lmu-telemetry && git pull && cd deploy && docker compose up -d --build
+git -c core.autocrlf=false archive main | ssh debian@vps-534a6b72.vps.ovh.net 'tar -x -C ~/lmu-telemetry'
+ssh debian@vps-534a6b72.vps.ovh.net 'cd ~/lmu-telemetry/deploy && docker compose up -d --build'
 ```
 
-If `lmu.caddy` changed, copy it again and validate/reload as above.
+Files deleted from the repository stay on the VPS until removed by hand. If
+`lmu.caddy` changed, copy it again and validate/reload as above.
 
 ## Moderation
 
