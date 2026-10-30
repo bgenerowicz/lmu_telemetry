@@ -108,3 +108,19 @@ def test_teleport_caught(extract, tmp_path):
 def test_wrong_track_length_caught(extract, tmp_path):
     v = verify_lap(open_extract(extract, tmp_path), 3, track_length_m=5000)
     assert "distance covers the lap" in failed(v)
+
+
+def test_known_edge_data_errors_are_skipped(monkeypatch):
+    import numpy as np
+
+    from lmu_core import verify
+    from lmu_core.lapfacts import LapFacts
+    from lmu_core.resample import ProcessedLap
+
+    distance = np.arange(1000.0)
+    lateral = np.where((distance > 600) & (distance < 700), 9.0, 2.0)
+    data = {"distance_m": distance, "track_edge_m": np.full(1000, 5.0), "path_lateral_m": lateral}
+    lap = ProcessedLap(LapFacts(track="Somewhere", car="Car", layout="Long"), data)
+    assert verify._off_track(lap) == (4.0, 601.0)
+    monkeypatch.setitem(verify.EDGE_DATA_ERRORS, ("Somewhere", "Long"), [(590.0, 710.0)])
+    assert verify._off_track(lap) == (-3.0, 0.0)

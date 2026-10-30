@@ -9,7 +9,8 @@ Track limits: LMU doesn't mark invalid laps in recordings. ``Track Edge`` is
 the edge on the side the car is on, so ``|Path Lateral| - |Track Edge|`` is
 how far the car's centre is beyond it. On the Algarve sample, kerb-using laps
 peak at ~0.9 m and a real off at 4.3 m; a GT3 or prototype is ~2 m wide, so
-beyond ~1 m all four wheels are past the edge.
+beyond ~1 m all four wheels are past the edge. Where the game's edge data is
+known to be wrong (``EDGE_DATA_ERRORS``), the check skips that stretch.
 """
 
 from __future__ import annotations
@@ -25,6 +26,13 @@ from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap, resample_lap
 
 OFF_TRACK_M = 1.2
+# Stretches (metres from the line) where ``Track Edge`` is narrower than the
+# road, by (track, layout). Long Beach: every lap of a 2026 qualifying session
+# was ~4 m "off" for ~115 m before turn 1, at 250 km/h, wheel straight, on a
+# street circuit with walls.
+EDGE_DATA_ERRORS: dict[tuple[str, str | None], list[tuple[float, float]]] = {
+    ("Grand Prix of Long Beach", "Grand Prix of Long Beach"): [(570.0, 710.0)],
+}
 TIME_TOLERANCE_S = 0.05
 # Integrated speed vs. distance along the reference line: different lines and
 # wheel-speed noise give a few percent either way.
@@ -177,5 +185,7 @@ def _off_track(p: ProcessedLap) -> tuple[float, float]:
         return -1.0, 0.0
     edge = p.data["track_edge_m"]
     beyond = np.where(np.abs(edge) < 20, np.abs(p.data["path_lateral_m"]) - np.abs(edge), -np.inf)
+    for start, end in EDGE_DATA_ERRORS.get((p.facts.track, p.facts.layout), []):
+        beyond[(p.distance_m >= start) & (p.distance_m <= end)] = -np.inf
     i = int(np.argmax(beyond))
     return float(beyond[i]), float(p.distance_m[i])

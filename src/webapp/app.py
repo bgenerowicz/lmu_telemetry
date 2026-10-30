@@ -46,6 +46,9 @@ from webapp.server_client import ServerClient, ServerError
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 SELF_BEST = "self:best"
 SELF_SECTIONS = "self:sections"
+# Online leaderboard views: the whole class, or the selected car only.
+BOARD_CLASS = "class"
+BOARD_CAR = "car"
 # Laps used for "your fastest sections"; more adds little and costs time.
 MAX_SECTION_LAPS = 30
 
@@ -163,7 +166,16 @@ def create_app(
                 ]),
                 dcc.Loading(html.Div(id="candidate-status", className="mt"), type="dot"),
                 # Anyone can see the leaderboard; signing in is only for uploading.
-                html.Div(id="board-note", className="mt"),
+                html.Div(className="row mt", children=[
+                    html.Div(id="board-note", className="grow-text"),
+                    html.Div(id="board-view-wrap", style={"display": "none"}, children=dcc.Dropdown(
+                        id="board-view", clearable=False, searchable=False, value=BOARD_CLASS,
+                        options=[{"label": "Combined: all cars in the class",
+                                  "value": BOARD_CLASS},
+                                 {"label": "This car only", "value": BOARD_CAR}],
+                        persistence=True, persistence_type="local",
+                    )),
+                ]),
                 html.Div(id="board-wrap", className="mt", children=[
                     dash_table.DataTable(
                         id="board", page_size=15,
@@ -487,25 +499,30 @@ def create_app(
 
     @app.callback(
         Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),
+        Output("board-view-wrap", "style"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
-        Input("server-version", "data"),
+        Input("server-version", "data"), Input("board-view", "value"),
     )
-    def board(track, car, recordings, _):
-        """The leaderboard for the car's class at this track (or just the car's, if its
-        class is unknown), with the selected car's laps highlighted."""
+    def board(track, car, recordings, _, view):
+        """The leaderboard for the car's class at this track, with the selected car's
+        laps highlighted; or just the car's (also when its class is unknown), with
+        your own laps highlighted."""
         hide = {"display": "none"}
         if not server() or not track or not car:
-            return [], hide, ""
+            return [], hide, "", hide
         car_class = class_of(track, car, recordings)
+        combined = bool(car_class) and view != BOARD_CAR
+        picker = {"width": 230} if car_class else hide
         try:
-            entries = (server().class_leaderboard(track, car_class) if car_class
+            entries = (server().class_leaderboard(track, car_class) if combined
                        else server().leaderboard(track, car))
         except ServerError as exc:
-            return [], hide, html.Span(f"Couldn't load the leaderboard: {exc}", className="muted")
+            return [], hide, html.Span(f"Couldn't load the leaderboard: {exc}",
+                                       className="muted"), hide
         if not entries:
-            what = f"{car_class} cars" if car_class else "this car"
+            what = f"{car_class} cars" if combined else "this car"
             return [], hide, html.Span(f"No laps on the leaderboard for {what} at this track yet.",
-                                       className="muted")
+                                       className="muted"), picker
         best = entries[0]["lap_time_s"]
         rows = [{
             "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
@@ -513,11 +530,11 @@ def create_app(
             "gap": "" if i == 0 else f"+{e['lap_time_s'] - best:.3f}",
             "conditions": _fmt_conditions(e),
             "recorded": _fmt_recorded(e["recorded_at"]),
-            "selected": int(e.get("car", car) == car),
+            "selected": int(e.get("car", car) == car if combined else bool(e.get("mine"))),
         } for i, e in enumerate(entries)]
-        title = f"{car_class} at {track}: each car's top drivers" if car_class else \
-            f"Top laps: {track} · {car}"
-        return rows, {}, html.B(title)
+        title = f"{car_class} at {track}: each car's top drivers" if combined else \
+            f"{car} at {track}: top drivers"
+        return rows, {}, html.B(title), picker
 
     # Laps the server has answered for this session (accepted or not): not retried,
     # so a turned-down lap can't be uploaded over and over.

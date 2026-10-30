@@ -73,11 +73,18 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
     [key] = [k for k in app.callback_map if "board.data" in k]
     board = app.callback_map[key]["callback"].__wrapped__
-    rows, style, note = board("Algarve International Circuit", "Garage 59 2026 #10:LM", [], 0)
+    rows, style, note, picker = board("Algarve International Circuit", "Garage 59 2026 #10:LM",
+                                      [], 0, "class")
     assert [(r["rank"], r["driver"], r["selected"]) for r in rows] == [(1, "Alice", 1)]
-    assert style == {} and "GT3 at Algarve" in str(note)
-    rows, style, note = board("Algarve International Circuit", "Some other car", [], 0)
+    assert style == {} and "GT3 at Algarve" in str(note) and picker != {"display": "none"}
+    rows, style, note, _ = board("Algarve International Circuit", "Some other car", [], 0, "class")
     assert rows == [] and "No laps" in str(note)
+
+    # Just the car: the same lap, not highlighted (it isn't this user's).
+    rows, style, note, _ = board("Algarve International Circuit", "Garage 59 2026 #10:LM",
+                                 [], 0, "car")
+    assert [(r["driver"], r["selected"]) for r in rows] == [("Alice", 0)]
+    assert "Garage 59 2026 #10:LM at Algarve" in str(note)
 
 
 def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path):
