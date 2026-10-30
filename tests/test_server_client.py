@@ -73,18 +73,25 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
     [key] = [k for k in app.callback_map if "board.data" in k]
     board = app.callback_map[key]["callback"].__wrapped__
-    rows, style, note, picker = board("Algarve International Circuit", "McLaren 720S GT3",
-                                      [], 0, "class")
+    rows, style, note, picker, options, view = board(
+        "Algarve International Circuit", "McLaren 720S GT3", [], 0, "class")
     assert [(r["rank"], r["driver"], r["selected"]) for r in rows] == [(1, "Alice", 1)]
     assert style == {} and "GT3 at Algarve" in str(note) and picker != {"display": "none"}
-    rows, style, note, _ = board("Algarve International Circuit", "Some other car", [], 0, "class")
+    assert [o["value"] for o in options] == ["class", "McLaren 720S GT3"] and view == "class"
+    rows, style, note, *_ = board("Algarve International Circuit", "Some other car", [], 0, "class")
     assert rows == [] and "No laps" in str(note)
 
-    # Just the car: the same lap, not highlighted (it isn't this user's).
-    rows, style, note, _ = board("Algarve International Circuit", "McLaren 720S GT3",
-                                 [], 0, "car")
+    # One car of the class: the same lap, not highlighted (it isn't this user's).
+    rows, style, note, _, options, view = board(
+        "Algarve International Circuit", "Another GT3 #1",
+        [{"track": "Algarve International Circuit", "car": "Another GT3 #1", "car_class": "GT3",
+          "laps": []}], 0, "McLaren 720S GT3")
     assert [(r["driver"], r["selected"]) for r in rows] == [("Alice", 0)]
-    assert "McLaren 720S GT3 at Algarve" in str(note)
+    assert "McLaren 720S GT3 at Algarve" in str(note) and view == "McLaren 720S GT3"
+    assert [o["value"] for o in options] == ["class", "Another GT3 #1", "McLaren 720S GT3"]
+    # A car that isn't there (e.g. from another track) falls back to the whole class.
+    *_, view = board("Algarve International Circuit", "McLaren 720S GT3", [], 0, "Gone GT3")
+    assert view == "class"
 
 
 def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path):

@@ -46,9 +46,8 @@ from webapp.server_client import ServerClient, ServerError
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 SELF_BEST = "self:best"
 SELF_SECTIONS = "self:sections"
-# Online leaderboard views: the whole class, or the selected car only.
+# Online leaderboard views: the whole class, or one car of it (by its name).
 BOARD_CLASS = "class"
-BOARD_CAR = "car"
 BOARD_CLICKED_ROW = {"backgroundColor": "#dbe6fb"}
 BOARD_STYLES = [
     # The selected car's laps stand out on the class leaderboard.
@@ -178,8 +177,7 @@ def create_app(
                     html.Div(id="board-note", className="grow-text"),
                     html.Div(id="board-view-wrap", style={"display": "none"}, children=dcc.Dropdown(
                         id="board-view", clearable=False, searchable=False, value=BOARD_CLASS,
-                        options=[{"label": "All cars in the class", "value": BOARD_CLASS},
-                                 {"label": "This car only", "value": BOARD_CAR}],
+                        options=[{"label": "All cars in the class", "value": BOARD_CLASS}],
                         persistence=True, persistence_type="local",
                     )),
                 ]),
@@ -491,30 +489,39 @@ def create_app(
 
     @app.callback(
         Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),
-        Output("board-view-wrap", "style"),
+        Output("board-view-wrap", "style"), Output("board-view", "options"),
+        Output("board-view", "value"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
         Input("server-version", "data"), Input("board-view", "value"),
     )
     def board(track, car, recordings, _, view):
         """The leaderboard for the car's class at this track, with the selected car's
-        laps highlighted; or just the car's (also when its class is unknown), with
-        your own laps highlighted."""
+        laps highlighted; or one car's of that class (the dropdown), or the selected
+        car's if its class is unknown, with your own laps highlighted."""
         hide = {"display": "none"}
         if not server() or not track or not car:
-            return [], hide, "", hide
+            return [], hide, "", hide, no_update, no_update
         car_class = class_of(track, car, recordings)
-        combined = bool(car_class) and view != BOARD_CAR
-        picker = {"width": 230} if car_class else hide
         try:
-            entries = (server().class_leaderboard(track, car_class) if combined
+            entries = (server().class_leaderboard(track, car_class) if car_class
                        else server().leaderboard(track, car))
         except ServerError as exc:
             return [], hide, html.Span(f"Couldn't load the leaderboard: {exc}",
-                                       className="muted"), hide
+                                       className="muted"), hide, no_update, no_update
+        # The cars to pick from: the class's at this track, and the selected one.
+        cars = sorted({e["car"] for e in entries} | {car})
+        options = [{"label": f"All {car_class} cars", "value": BOARD_CLASS},
+                   *({"label": c, "value": c} for c in cars)]
+        if view not in cars:
+            view = BOARD_CLASS
+        picker = {"width": 230} if car_class else hide
+        combined = bool(car_class) and view == BOARD_CLASS
+        if car_class and not combined:
+            entries = [e for e in entries if e["car"] == view]
         if not entries:
-            what = f"{car_class} cars" if combined else "this car"
+            what = f"{car_class} cars" if combined else (view if car_class else "this car")
             return [], hide, html.Span(f"No laps on the leaderboard for {what} at this track yet.",
-                                       className="muted"), picker
+                                       className="muted"), picker, options, view
         best = entries[0]["lap_time_s"]
         rows = [{
             "id": e["id"], "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
@@ -525,8 +532,8 @@ def create_app(
             "selected": int(e.get("car", car) == car if combined else bool(e.get("mine"))),
         } for i, e in enumerate(entries)]
         title = f"{car_class} at {track}: each car's top drivers" if combined else \
-            f"{car} at {track}: top drivers"
-        return rows, {}, html.B(title), picker
+            f"{view if car_class else car} at {track}: top drivers"
+        return rows, {}, html.B(title), picker, options, view
 
     @app.callback(
         Output("board", "style_data_conditional"), Output("board", "active_cell"),
