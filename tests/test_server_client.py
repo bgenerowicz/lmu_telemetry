@@ -96,11 +96,11 @@ def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path)
     track = "Algarve International Circuit"
     mine = [{"track": track, "car": "Another GT3 #1", "car_class": "GT3", "laps": []}]
     labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
-                                                                  mine, 0, 0, None)[0]]
+                                                                  mine, 0, 0, None, None)[0]]
     assert any("Alice" in l and "other car: Garage 59 2026 #10:LM" in l for l in labels)
     other_class = [{**mine[0], "car_class": "Hypercar"}]
     labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
-                                                                  other_class, 0, 0, None)[0]]
+                                                                  other_class, 0, 0, None, None)[0]]
     assert labels == []
 
 
@@ -135,3 +135,29 @@ def test_errors_are_readable(server_url):
         ServerClient(server_url, "bad-token").me()
     with pytest.raises(ServerError, match="Can't reach"):
         ServerClient("http://127.0.0.1:9").health()
+
+
+def test_clicking_a_leaderboard_row_picks_that_lap(server_url, tmp_path):
+    from dash._callback_context import context_value
+    from dash._utils import AttributeDict
+
+    from webapp.app import create_app as create_webapp
+
+    ServerClient(server_url, token_for(server_url, "Alice")).upload_lap(ALGARVE, 3)
+    client = ServerClient(server_url, token_for(server_url, "Bob"))
+    client.upload_lap(ALGARVE, 2)
+    track, car = "Algarve International Circuit", "Garage 59 2026 #10:LM"
+    # Runs last: Bob's upload would change the candidates above.
+    # Bob's lap: not the car's fastest, so only offered once picked.
+    lap_id = next(e["id"] for e in client.leaderboard(track, car) if e["driver"] == "Bob")
+    app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
+    options = app.callback_map["..reference.options...reference.value...reference-empty.children.."]
+    mine = [{"track": track, "car": "Another GT3 #1", "car_class": "GT3", "laps": []}]
+    clicked = {"row": 0, "column": 1, "column_id": "driver", "row_id": lap_id}
+    context_value.set(AttributeDict(triggered_inputs=[
+        {"prop_id": "board.active_cell", "value": clicked}]))
+    offered, value, _ = options["callback"].__wrapped__(track, "Another GT3 #1", mine, 0, 0,
+                                                        clicked, None)
+    assert value == f"srv:{lap_id}"
+    assert any(o["value"] == value and o["label"].startswith("#2 Bob") for o in offered)
+

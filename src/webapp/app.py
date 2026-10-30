@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlencode
@@ -320,9 +321,14 @@ def create_app(
         Output("reference-empty", "children"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
         Input("refs-version", "data"), Input("server-version", "data"),
+        Input("board", "active_cell"),
         State("reference", "value"),
     )
-    def reference_options(track, car, recordings, _, __, current):
+    def reference_options(track, car, recordings, _, __, clicked, current):
+        # A click on the online leaderboard picks that lap (rows' ids are lap ids).
+        wanted = current
+        if clicked and clicked.get("row_id") and ctx.triggered_id == "board":
+            wanted = f"srv:{clicked['row_id']}"
         online, online_note = [], ""
         if server() and track and car:
             try:
@@ -331,18 +337,22 @@ def create_app(
                 online_note = f" Online leaderboard: {exc}"
         refs = sorted((r for r in references() if r.track == track), key=lambda r: r.lap_time_s)
         same = [r for r in refs if r.car == car]
-        boards = [b for b in server_boards() if b["track"] == track]
         car_class = class_of(track, car, recordings)
         other = [r for r in refs if r.car != car and car_class and r.car_class == car_class]
-        # Other cars of the same class: their fastest online lap each.
-        other_online = []
-        for b in boards:
-            if b["car"] != car and car_class and b["car_class"] == car_class:
-                try:
-                    other_online += [(b["car"], e) for e in server().leaderboard(track, b["car"])[:1]]
-                except ServerError:
-                    pass
-        other_online.sort(key=lambda x: x[1]["lap_time_s"])
+        # Other cars of the same class: their fastest online lap each, and the one
+        # picked on the leaderboard. Ranks are within each car.
+        other_online, per_car = [], defaultdict(int)
+        if server() and track and car_class:
+            try:
+                class_board = server().class_leaderboard(track, car_class)
+            except ServerError:
+                class_board = []
+            for e in class_board:
+                if e.get("car") == car:
+                    continue
+                per_car[e["car"]] += 1
+                if per_car[e["car"]] == 1 or f"srv:{e['id']}" == wanted:
+                    other_online.append((e["car"], {**e, "rank": per_car[e["car"]]}))
         options = [
             {"label": f"#{e['rank']} {e['driver']} · {_fmt_time(e['lap_time_s'])} (online)",
              "value": f"srv:{e['id']}"}
@@ -368,8 +378,8 @@ def create_app(
             ]
         values = [o["value"] for o in options]
         empty = ("" if same or online else "No other drivers' laps for this car yet.") + online_note
-        if current in values:
-            return options, current, empty
+        if wanted in values:
+            return options, wanted, empty
         return options, (values[0] if values else None), empty
 
     @app.callback(
@@ -506,7 +516,7 @@ def create_app(
                                        className="muted"), picker
         best = entries[0]["lap_time_s"]
         rows = [{
-            "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
+            "id": e["id"], "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
             "time": _fmt_time(e["lap_time_s"]),
             "gap": "" if i == 0 else f"+{e['lap_time_s'] - best:.3f}",
             "conditions": _fmt_conditions(e),
