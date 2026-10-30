@@ -31,20 +31,29 @@ server, reading the same processed lap format.
    inputs, gear, rpm, g-forces, x/y), with the `LapFacts` as JSON in the
    Parquet schema metadata. This is what gets uploaded and shared. Resampled
    lap times match the official ones to within 0.01 s.
-4. **Segment** the track into corners and straights, once per track (stored
-   on the server, editable), so every lap is cut at the same distances.
-5. **Compare** a lap with a reference (`compare.py`): `Δt(d) = t_lap(d) − t_ref(d)`.
-   Time lost in a segment is Δt at its exit minus Δt at its entry.
-6. **Advise** from per-segment metrics: braking point and pressure, entry,
-   minimum and exit speed, throttle pickup, full-throttle point; on straights,
-   speed carried in from the previous corner exit.
+4. **Segment** (`segments.py`) the track into corners and straights. Every
+   clear dip in speed (at least 8 km/h) is a corner, running from the speed
+   peak before it to the end of the curve after the slowest point (from the
+   curvature of the driven line). Between corners are straights. Segments are
+   found from the median of the session's laps, so one-off moments don't
+   create or hide corners. Later: store them per track on the server, editable.
+5. **Compare** (`compare.py`, `analysis.py`): `Δt(d) = t_lap(d) − t_ref(d)`.
+   Without a faster driver, the reference for each segment is the driver's own
+   fastest lap through it; adding those up gives the theoretical best lap.
+6. **Advise** (`analysis.py`) from per-segment metrics: braking point and
+   peak pressure, entry, minimum and exit speed, full-throttle point, metres
+   off throttle. Losses on a straight that come from a slower start are blamed
+   on the exit of the corner before it.
 
-`scripts/compare_laps.py` plots a lap against a reference as an HTML page.
+The desktop app (`src/desktop`) renders this as a self-contained HTML report
+and is packaged as a Windows exe by `.github/workflows/build-windows.yml`.
 
 ## What the recordings contain
 
 Checked against `samples/` (LMU, October 2026):
 
+- Pedals: `Throttle Pos`/`Brake Pos` include traction-control and shift cuts;
+  the `... Unfiltered` channels are the driver's actual inputs and are used.
 - ~65 continuous channels (inputs and `Ground Speed`/`Engine RPM`/`Steering Pos`
   at 50–100 Hz; `Lap Dist`, `GPS Latitude`/`Longitude`, G-forces at 10 Hz;
   `Fuel Level` 20 Hz; `Track Temperature` 1 Hz) and ~40 event channels.

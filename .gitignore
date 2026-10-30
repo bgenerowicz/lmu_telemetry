@@ -11,4 +11,5 @@ build/
 # Local data produced by the tools (raw samples for development go in samples/)
 data/
 *.duckdb.wal
-compare.html
+*.spec
+report.html

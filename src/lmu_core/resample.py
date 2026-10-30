@@ -17,23 +17,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 from lmu_core.lapfacts import LapFacts
 from lmu_core.laps import Lap, lap_facts
 from lmu_core.recording import Recording
 
-# Output column -> recording channel. Columns are named with their units.
+# Output column -> recording channels, first one present wins. Columns are
+# named with their units. Pedals use the "Unfiltered" channels: what the
+# driver's feet did, without traction control and shift cuts.
 CHANNELS = {
-    "speed_kph": "Ground Speed",
-    "throttle_pct": "Throttle Pos",
-    "brake_pct": "Brake Pos",
-    "steering_pct": "Steering Pos",
-    "rpm": "Engine RPM",
-    "g_lat": "G Force Lat",
-    "g_long": "G Force Long",
-    "path_lateral_m": "Path Lateral",
+    "speed_kph": ["Ground Speed"],
+    "throttle_pct": ["Throttle Pos Unfiltered", "Throttle Pos"],
+    "brake_pct": ["Brake Pos Unfiltered", "Brake Pos"],
+    "steering_pct": ["Steering Pos Unfiltered", "Steering Pos"],
+    "rpm": ["Engine RPM"],
+    "g_lat": ["G Force Lat"],
+    "g_long": ["G Force Long"],
+    "path_lateral_m": ["Path Lateral"],
 }
 EVENTS = {"gear": "Gear"}
 
@@ -54,13 +54,20 @@ class ProcessedLap:
     def time_s(self) -> np.ndarray:
         return self.data["time_s"]
 
+    # pyarrow is imported on use: the desktop report doesn't need it, and it is
+    # most of the executable's size.
     def to_parquet(self, path: str | Path) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
         table = pa.table(self.data)
         meta = {_FACTS_KEY: json.dumps(dataclasses.asdict(self.facts)).encode()}
         pq.write_table(table.replace_schema_metadata(meta), path)
 
     @classmethod
     def from_parquet(cls, path: str | Path) -> ProcessedLap:
+        import pyarrow.parquet as pq
+
         table = pq.read_table(path)
         facts = LapFacts(**json.loads(table.schema.metadata[_FACTS_KEY]))
         return cls(facts, {name: table[name].to_numpy() for name in table.column_names})
@@ -92,8 +99,9 @@ def resample_lap(rec: Recording, lap: Lap, step_m: float = 1.0) -> ProcessedLap:
     t_grid = np.interp(grid, dist, t_dist)
     data = {"distance_m": grid, "time_s": t_grid - t_grid[0]}
 
-    for column, name in CHANNELS.items():
-        if name in rec.channels:
+    for column, names in CHANNELS.items():
+        name = next((n for n in names if n in rec.channels), None)
+        if name is not None:
             ts, values = rec.channel(name)
             data[column] = np.interp(t_grid, ts, values)
     for column, name in EVENTS.items():
