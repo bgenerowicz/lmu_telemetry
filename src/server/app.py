@@ -264,9 +264,10 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         return 422, _rejected("The lap failed verification.", checks=checks)
     # Identify the lap by what it is, not the file's bytes, so re-packing the
     # same lap (e.g. to upload it from a second account) is still a duplicate.
+    # Per ruleset, so a lap can enter the leaderboards of a new ruleset too.
     f = v.facts
     fingerprint = hashlib.sha256(
-        f"{f.recorded_at}|{f.lap_number}|{f.lap_time_s:.4f}|{f.track}|{f.car}".encode()
+        f"{ruleset.id}|{f.recorded_at}|{f.lap_number}|{f.lap_time_s:.4f}|{f.track}|{f.car}".encode()
     ).hexdigest()
     if con.execute("SELECT 1 FROM laps WHERE file_hash = ?", (fingerprint,)).fetchone():
         return 409, _rejected("This lap was already uploaded.")

@@ -300,3 +300,12 @@ def test_ruleset_must_key_leaderboards_by_stored_fields(tmp_path):
         "top_n_per: [car]", "top_n_per: [weather]"))
     with pytest.raises(ValueError, match="weather"):
         make_client(tmp_path, ruleset=ruleset)
+
+
+def test_same_lap_can_enter_a_new_ruleset(tmp_path, extracts):
+    v1, _ = make_client(tmp_path, ruleset="loose-v1.yaml")
+    assert upload(v1, sign_in(v1, "Alice"), extracts[3]).status_code == 201
+    v2, _ = make_client(tmp_path, ruleset="loose-v2.yaml")
+    alice = sign_in(v2, "Alice")
+    assert upload(v2, alice, extracts[3]).status_code == 201
+    assert upload(v2, alice, extracts[3]).status_code == 409
