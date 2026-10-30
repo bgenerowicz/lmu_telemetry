@@ -66,9 +66,9 @@ docker compose exec lmu-server python -m server.admin ban STEAM_ID
 
 To add laps for a driver who sent their telemetry instead of uploading (same
 checks as an upload, shown under NAME, no Steam account), copy lap extracts
-into `data/` and:
+into `data/import/` and (`sh -c` so the `*` is expanded inside the container):
 ```bash
-docker compose exec lmu-server python -m server.admin import-lap --as "NAME" /data/import/*.duckdb.gz
+docker compose exec lmu-server sh -c 'python -m server.admin import-lap --as "NAME" /data/import/*.duckdb.gz'
 ```
 
 ## Backups
