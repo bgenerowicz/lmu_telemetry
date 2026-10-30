@@ -10,11 +10,10 @@ where you lose time and why, with traces and a track map.
 
 ## LMU Lap Analyser (Windows)
 
-1. Download `lmu-analyser.exe`: open the latest successful
-   [Build Windows app](https://github.com/bgenerowicz/lmu_telemetry/actions/workflows/build-windows.yml)
-   run and download the `lmu-analyser-windows` artifact (you need to be
-   signed in to GitHub), or take it from a
-   [release](https://github.com/bgenerowicz/lmu_telemetry/releases) if there is one.
+1. Download [`lmu-analyser.exe`](https://github.com/bgenerowicz/lmu_telemetry/releases/latest/download/lmu-analyser.exe)
+   from the [latest release](https://github.com/bgenerowicz/lmu_telemetry/releases/latest)
+   (while the repo is private, you need to be signed in to GitHub). Every push
+   to the default branch rebuilds it.
 2. In LMU, turn on telemetry recording (Settings → Gameplay) and drive a
    session with a few timed laps.
 3. Run `lmu-analyser.exe`. A console window opens (keep it open; close it to

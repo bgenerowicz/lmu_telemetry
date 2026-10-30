@@ -7,7 +7,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # to attach the exe to a release when a v* tag is pushed
+  contents: write  # to publish the exe as a release
+
+# A newer push makes an older build pointless; don't let two race on the release.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -40,7 +45,21 @@ jobs:
           name: lmu-analyser-windows
           path: dist/lmu-analyser.exe
 
-      - name: Attach to release
+      # Pushes to the default branch replace the "latest" release, so
+      # releases/latest/download/lmu-analyser.exe always has the newest build.
+      - name: Publish as the latest release
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist/lmu-analyser.exe \
+            --title "LMU Lap Analyser (latest build)" \
+            --notes "Built from ${GITHUB_SHA::7} on $(date -u +%Y-%m-%d). Download lmu-analyser.exe below." \
+            --target "$GITHUB_SHA" --latest
+
+      - name: Attach to versioned release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
