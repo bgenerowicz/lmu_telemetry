@@ -170,8 +170,7 @@ def create_app(
                     html.Div(id="board-note", className="grow-text"),
                     html.Div(id="board-view-wrap", style={"display": "none"}, children=dcc.Dropdown(
                         id="board-view", clearable=False, searchable=False, value=BOARD_CLASS,
-                        options=[{"label": "Combined: all cars in the class",
-                                  "value": BOARD_CLASS},
+                        options=[{"label": "All cars in the class", "value": BOARD_CLASS},
                                  {"label": "This car only", "value": BOARD_CAR}],
                         persistence=True, persistence_type="local",
                     )),
