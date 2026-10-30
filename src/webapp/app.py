@@ -588,9 +588,9 @@ def _sections_table(a: SessionAnalysis, lap_id: str) -> dash_table.DataTable:
         style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
         style_data_conditional=[
             {"if": {"filter_query": "{delta} > 0.1", "column_id": "delta"},
-             "backgroundColor": "#fdecea", "color": "#b42318"},
+             "backgroundColor": "#fdeee6", "color": "#a8461b"},
             {"if": {"filter_query": "{delta} < -0.05", "column_id": "delta"},
-             "backgroundColor": "#e7f6ec", "color": "#1a7f37"},
+             "backgroundColor": "#e3f5ee", "color": "#0b6b4a"},
         ],
     )
 
@@ -762,14 +762,15 @@ _INDEX = """<!DOCTYPE html>
   .card { border: 1px solid #e2e5ea; border-radius: 10px; padding: 10px 14px; min-width: 180px; }
   .card .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #646b77; }
   .card .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .finding { border: 1px solid #e2e5ea; border-left: 4px solid #d6352b; border-radius: 8px;
+  /* Orange = time lost, teal = time gained: the same colours as the map. */
+  .finding { border: 1px solid #e2e5ea; border-left: 4px solid #eb6834; border-radius: 8px;
              padding: 8px 14px; margin: 8px 0; }
-  .finding.straight { border-left-color: #e3a008; }
+  .finding.straight { border-left-style: dashed; }
   .finding .head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
   .finding .name { font-weight: 600; font-size: 16px; }
-  .finding .lost { margin-left: auto; font-weight: 600; color: #b42318; font-variant-numeric: tabular-nums; }
+  .finding .lost { margin-left: auto; font-weight: 600; color: #a8461b; font-variant-numeric: tabular-nums; }
   .finding ul { margin: 4px 0 0; padding-left: 20px; }
-  .gains { background: #e7f6ec; border: 1px solid #b7e1c3; padding: 8px 14px; border-radius: 8px; }
+  .gains { background: #e3f5ee; border: 1px solid #9fd9c2; padding: 8px 14px; border-radius: 8px; }
   .viz { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; margin-top: 8px;
          align-items: start; }
   /* The map stays in view while scrolling through the traces. */

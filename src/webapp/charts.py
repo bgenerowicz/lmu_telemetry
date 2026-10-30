@@ -27,9 +27,18 @@ ROWS = [
     ("Line: lateral position (m, + = right)", "path_lateral_m"),
     ("Gear", "gear"),
 ]
-REF_COLOR = "#1f6fd1"
-LAP_COLOR = "#d6352b"
+# Colours have one job each. Which lap: the reference is a neutral "ghost"
+# grey and your lap the one strong colour. Time lost/gained: orange/teal with a
+# grey middle, used for nothing else (map band, finding cards, sections table).
+# Checked with the dataviz palette validator, including colour-blind separation.
+REF_COLOR = "#52514e"
+LAP_COLOR = "#6250d6"
+LOSS_COLOR = "#eb6834"
+GAIN_COLOR = "#1baf7a"
 EDGE_COLOR = "#9aa1ac"
+# Gain -> nothing -> loss; the middle matches the track surface, so sections
+# with no difference disappear into it.
+DELTA_SCALE = [[0.0, GAIN_COLOR], [0.5, "#e4e7ec"], [1.0, LOSS_COLOR]]
 # Window over which the map shows time gained or lost.
 MAP_WINDOW_M = 50
 
@@ -110,8 +119,9 @@ def map_figure(
     lost = np.concatenate([dt[w:] - dt[:-w], np.zeros(w)])
     fig.add_trace(go.Scatter(
         x=ref_x, y=ref_y, mode="markers", name="Time lost", meta="loss",
-        marker=dict(color=lost, colorscale="RdBu_r", cmid=0, size=12, opacity=0.6,
-                    colorbar=dict(title=f"s lost<br>per {w} m", len=0.35, y=0.85, thickness=12)),
+        marker=dict(color=lost, colorscale=DELTA_SCALE, cmid=0, size=12, opacity=0.75,
+                    colorbar=dict(title=f"per {w} m", len=0.35, y=0.85, thickness=12,
+                                  ticksuffix=" s")),
         hoverinfo="skip", showlegend=False,
     ))
     for name, x, y, color, meta in ((ref_name, ref_x, ref_y, REF_COLOR, "ref-line"),
