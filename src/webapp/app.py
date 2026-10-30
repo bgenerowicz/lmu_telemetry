@@ -504,7 +504,9 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         cards.append(("Biggest loss", f.segment.name, f"{f.time_lost_s:.3f} s"))
 
     geometry = track_geometry(ref, list(a.laps.values()))
-    graph_config = {"displaylogo": False}
+    # No Plotly toolbar: zoom by dragging (traces) or scrolling (map), move by
+    # dragging the map, reset by double-clicking or with "Reset zoom".
+    graph_config = {"displayModeBar": False, "doubleClick": "reset"}
     viz = [html.Div(className="viz-traces", children=dcc.Graph(
         id="traces", figure=traces_figure(lap, ref, a.segments, lap_label, ref_label, geometry),
         config=graph_config,
