@@ -1,0 +1,9 @@
+# Goes in /home/debian/www/ next to the other sites; the existing Caddy
+# container imports /home/debian/www/*.caddy. Replace the hostname.
+lmu.example.com {
+	encode gzip
+	request_body {
+		max_size 12MB
+	}
+	reverse_proxy lmu-server:8000
+}

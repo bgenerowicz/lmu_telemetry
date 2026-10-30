@@ -85,6 +85,8 @@ def lap_facts(rec: Recording, lap: Lap) -> LapFacts:
         weather=meta.get("WeatherConditions"),
         track_temp_c=_channel_at(rec, "Track Temperature", lap.start_ts),
         ambient_temp_c=_channel_at(rec, "Ambient Temperature", lap.start_ts),
+        rain_pct=_channel_at(rec, "Rain", lap.start_ts),
+        track_wetness_pct=_event_at(rec, "Minimum Path Wetness", lap.start_ts),
         # The setup JSON doesn't say whether it is the default setup.
         setup_is_default=None,
         fuel_at_start_l=_channel_at(rec, "Fuel Level", lap.start_ts),
@@ -103,6 +105,13 @@ def _value_at(ts: np.ndarray, values: np.ndarray, t: float):
     """Value of an event channel at time ``t`` (last change at or before it)."""
     i = np.searchsorted(ts, t + _TS_TOLERANCE, side="right") - 1
     return values[max(i, 0)]
+
+
+def _event_at(rec: Recording, name: str, t: float) -> float | None:
+    if name not in rec.events:
+        return None
+    ts, values = rec.event(name)
+    return float(_value_at(ts, values, t)) if len(ts) else None
 
 
 def _channel_at(rec: Recording, name: str, t: float) -> float | None:

@@ -1,4 +1,4 @@
-"""FastAPI server: receives processed laps and keeps the top N per leaderboard key.
+"""Leaderboard server: Steam sign-in, verified lap uploads, top laps per track and car.
 
-Not implemented yet.
+Run locally:  python -m server   (see server/config.py for settings)
 """

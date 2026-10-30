@@ -24,6 +24,8 @@ class LapFacts:
     weather: str | None = None
     track_temp_c: float | None = None
     ambient_temp_c: float | None = None
+    rain_pct: float | None = None
+    track_wetness_pct: float | None = None
 
     # Car state.
     setup_is_default: bool | None = None

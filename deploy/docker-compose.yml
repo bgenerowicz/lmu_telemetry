@@ -1,0 +1,21 @@
+# Leaderboard server on a VPS that already runs Caddy in a container.
+# From the repository root:  docker compose -f deploy/docker-compose.yml up -d --build
+services:
+  lmu-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: lmu-server
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+    # Not published on the host: Caddy reaches it over the shared network.
+    networks:
+      - caddy
+
+networks:
+  caddy:
+    # The existing Caddy container's network (see deploy/README.md to find it).
+    external: true
+    name: ${CADDY_NETWORK:-caddy}

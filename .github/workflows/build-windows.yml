@@ -25,7 +25,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install -e ".[dev,webapp]" pyinstaller
+        run: pip install -e ".[dev,webapp,server]" pyinstaller
 
       - name: Test
         run: pytest -q
