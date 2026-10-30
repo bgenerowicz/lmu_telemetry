@@ -103,7 +103,7 @@ def create_app(
             dcc.Store(id="refs-version", data=0),
             dcc.Store(id="server-version", data=0),
             # Outputs for the browser-side callbacks that link traces and map.
-            dcc.Store(id="sync-hover"), dcc.Store(id="sync-map-hover"), dcc.Store(id="sync-zoom"),
+            dcc.Store(id="sync-hover"), dcc.Store(id="sync-zoom"),
             dcc.Store(id="sync-focus"), dcc.Store(id="sync-reset"),
             html.Header([
                 html.H1("LMU Lap Analyser"),
@@ -459,9 +459,6 @@ def create_app(
     # moving markers and zooming must feel instant and keep the user's view.
     app.clientside_callback(ClientsideFunction("lmu", "onHover"), Output("sync-hover", "data"),
                             Input("traces", "hoverData"), prevent_initial_call=True)
-    app.clientside_callback(ClientsideFunction("lmu", "onMapHover"),
-                            Output("sync-map-hover", "data"),
-                            Input("map", "hoverData"), prevent_initial_call=True)
     app.clientside_callback(ClientsideFunction("lmu", "onTracesZoom"), Output("sync-zoom", "data"),
                             Input("traces", "relayoutData"), prevent_initial_call=True)
     app.clientside_callback(ClientsideFunction("lmu", "onFocus"), Output("sync-focus", "data"),
@@ -529,9 +526,8 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
             ]) for k, v, sub in cards
         ]),
         html.Div(className="row mt viz-help", children=[
-            html.Span("On the map, scroll to zoom and drag to move; hover a line to mark that "
-                      "point on the traces. Drag across the traces to zoom in; the map follows. "
-                      "Click a section below to jump to it.",
+            html.Span("On the map, scroll to zoom and drag to move. Drag across the traces to "
+                      "zoom in; the map follows. Click a section below to jump to it.",
                       className="muted grow-text"),
             html.Button("Reset zoom", id="reset-zoom", className="btn"),
         ]),
@@ -668,36 +664,6 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (functi
     const pad = Math.max(15, 0.15 * Math.max(x1 - x0, y1 - y0));
     Plotly.relayout(gd, {'xaxis.range': [x0 - pad, x1 + pad], 'yaxis.range': [y0 - pad, y1 + pad]});
   }
-  // Both cars' positions on the map at distance d.
-  function showOnMap(d) {
-    const gd = plot('map');
-    if (!gd) return;
-    const update = {x: [], y: []}, idx = [];
-    for (const [line, pos] of [['ref-line', 'ref-pos'], ['lap-line', 'lap-pos']]) {
-      const li = find(gd, line), pi = find(gd, pos);
-      if (li < 0 || pi < 0) continue;
-      const t = gd._fullData[li], k = at(t.x, d);
-      update.x.push([t.x[k]]); update.y.push([t.y[k]]); idx.push(pi);
-    }
-    if (idx.length) Plotly.restyle(gd, update, idx);
-  }
-  // A vertical line through all trace rows at distance d (one shape, reused).
-  function showOnTraces(d) {
-    const gd = plot('traces');
-    if (!gd) return;
-    const shapes = gd.layout.shapes || [];
-    const i = shapes.findIndex(s => s.name === 'cursor');
-    // An object at an existing index would insert another shape, so move the
-    // existing line by its coordinates and only add it the first time.
-    if (i >= 0) {
-      Plotly.relayout(gd, {['shapes[' + i + '].x0']: d, ['shapes[' + i + '].x1']: d});
-      return;
-    }
-    Plotly.relayout(gd, {['shapes[' + shapes.length + ']']: {
-      name: 'cursor', type: 'line', xref: 'x', yref: 'paper', x0: d, x1: d, y0: 0, y1: 1,
-      line: {color: '#1d2128', width: 1, dash: 'dot'}, layer: 'above',
-    }});
-  }
   function resetMap() {
     const gd = plot('map');
     if (gd) Plotly.relayout(gd, {'xaxis.autorange': true, 'yaxis.autorange': true});
@@ -706,21 +672,16 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (functi
   return {
     // Hovering the traces shows where both cars are on the map.
     onHover(hover) {
-      if (!hover || !hover.points || !hover.points.length) return none();
-      showOnMap(hover.points[0].x);
-      return none();
-    },
-    // Hovering a driving line on the map marks that distance on the traces.
-    onMapHover(hover) {
       const gd = plot('map');
       if (!gd || !hover || !hover.points || !hover.points.length) return none();
-      // Dash's hover data leaves out customdata, so read the distance from the
-      // hovered driving line itself.
-      const pt = hover.points[0], t = gd._fullData[pt.curveNumber];
-      if (!t || (t.meta !== 'ref-line' && t.meta !== 'lap-line') || !t.customdata) return none();
-      const d = t.customdata[pt.pointNumber];
-      showOnMap(d);
-      showOnTraces(d);
+      const d = hover.points[0].x, update = {x: [], y: []}, idx = [];
+      for (const [line, pos] of [['ref-line', 'ref-pos'], ['lap-line', 'lap-pos']]) {
+        const li = find(gd, line), pi = find(gd, pos);
+        if (li < 0 || pi < 0) continue;
+        const t = gd._fullData[li], k = at(t.x, d);
+        update.x.push([t.x[k]]); update.y.push([t.y[k]]); idx.push(pi);
+      }
+      if (idx.length) Plotly.restyle(gd, update, idx);
       return none();
     },
     // Zooming the traces to a distance range zooms the map to the same stretch.
