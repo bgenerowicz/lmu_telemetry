@@ -53,7 +53,10 @@ CREATE TABLE IF NOT EXISTS used_nonces (
 
 def connect(data_dir: Path) -> sqlite3.Connection:
     data_dir.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(data_dir / "lmu.sqlite3", timeout=10, isolation_level=None)
+    # Each request has its own connection, but FastAPI may open and close it on
+    # different worker threads, which sqlite3 refuses unless told otherwise.
+    con = sqlite3.connect(data_dir / "lmu.sqlite3", timeout=10, isolation_level=None,
+                          check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
