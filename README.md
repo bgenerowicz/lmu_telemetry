@@ -26,6 +26,10 @@ theoretical best lap and where you're least consistent.
 Windows may warn about an unknown publisher, since the exe isn't signed:
 choose "More info" → "Run anyway".
 
+**Example:** [`docs/example-report.html`](docs/example-report.html) is the
+report for the Algarve sample. GitHub shows HTML as source, so download it
+(the "Download raw file" button) or open it from your clone in a browser.
+
 From source, on any OS:
 
 ```bash
