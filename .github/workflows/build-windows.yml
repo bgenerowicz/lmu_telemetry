@@ -34,7 +34,7 @@ jobs:
       - name: Smoke test exe on the sample recordings
         shell: pwsh
         run: |
-          $files = Get-ChildItem samples -Filter *.duckdb | ForEach-Object { $_.FullName }
+          $files = @(Get-ChildItem samples -Filter *.duckdb | ForEach-Object { $_.FullName })
           .\dist\lmu-analyser.exe $files[0] --no-open -o report.html
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Item report.html).Length -lt 1MB) { throw "report too small" }
