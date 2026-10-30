@@ -1,9 +1,12 @@
-# Goes in /home/debian/www/ next to the other sites; the existing Caddy
-# container imports /home/debian/www/*.caddy. Replace the hostname.
-lmu.example.com {
-	encode gzip
+# Goes in /home/debian/www/ next to the other projects' snippets. The VPS's
+# shared Caddyfile imports /srv/*.caddy inside its one site block
+# (vps-534a6b72.vps.ovh.net), so this serves the server at /lmu/.
+# LMU_PUBLIC_URL in .env must match: https://vps-534a6b72.vps.ovh.net/lmu
+redir /lmu /lmu/
+handle_path /lmu/* {
 	request_body {
 		max_size 12MB
 	}
-	reverse_proxy lmu-server:8000
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
 }

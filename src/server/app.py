@@ -201,7 +201,7 @@ def create_app(
             f"<p>Leaderboards for <b>{html.escape(ruleset.name)}</b>: "
             f"{html.escape(ruleset.description)}</p>"
             "<table><tr><th>Track</th><th>Car</th><th>Drivers</th><th>Best</th></tr>"
-            f"{rows}</table><p><a href=/privacy>Privacy</a></p>"))
+            f"{rows}</table><p><a href=privacy>Privacy</a></p>"))
 
     @app.get("/privacy", response_class=HTMLResponse)
     def privacy() -> str:
