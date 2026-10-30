@@ -1,4 +1,4 @@
-"""The library and the Dash app, against the samples and bundled references."""
+"""The library and the Dash app, against the samples."""
 
 from pathlib import Path
 
@@ -29,12 +29,6 @@ def test_scan_reports_unreadable_files(tmp_path):
     assert infos == [] and len(errors) == 1
 
 
-def test_bundled_references_load():
-    refs, errors = load_references([REFERENCES])
-    assert errors == []
-    assert any(r.track == "Algarve International Circuit" for r in refs)
-
-
 def test_save_reference_round_trip(tmp_path):
     info = scan_folder(SAMPLES)[0][0]
     path = save_reference(load_lap(info.path, info.best_lap.number), tmp_path)
@@ -53,7 +47,7 @@ def test_app_builds_and_serves_layout(tmp_path):
 
 
 def test_results_against_expert_lap(tmp_path):
-    """Run the results callback directly: lap 2 against the bundled expert lap."""
+    """Run the results callback directly: lap 2 against lap 3 saved as an expert lap."""
     from webapp import app as webapp
 
     infos, _ = scan_folder(SAMPLES)
@@ -61,7 +55,8 @@ def test_results_against_expert_lap(tmp_path):
     info = next(i for i in infos if i.track == "Algarve International Circuit")
     rows = webapp._my_laps(recordings, info.track, info.car)
     lap2 = next(i for i, r in enumerate(rows) if r["lap"] == 2)
-    [ref] = [r for r in load_references([REFERENCES])[0] if r.track == info.track]
+    save_reference(load_lap(info.path, 3), tmp_path / "refs")
+    [ref] = load_references([tmp_path / "refs"])[0]
 
     app = webapp.create_app([REFERENCES], tmp_path / "refs")
     results = app.callback_map["results.children"]["callback"]

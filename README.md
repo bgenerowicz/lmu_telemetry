@@ -4,8 +4,8 @@ Compare your Le Mans Ultimate laps against fast reference laps, and see
 corner by corner (and straight by straight) where you lose time and why.
 
 Status: early. **LMU Lap Analyser** is a local app: pick a track and car,
-point it at your telemetry folder, choose one of your laps and an expert lap
-to compare against, and it shows corner by corner (and straight by straight)
+point it at your telemetry folder, choose one of your laps and a lap
+to compare against (from the online leaderboard, or your own), and it shows corner by corner (and straight by straight)
 where you lose time and why, with traces and a track map.
 
 ## LMU Lap Analyser (Windows)
@@ -19,12 +19,13 @@ where you lose time and why, with traces and a track map.
 3. Run `lmu-analyser.exe`. A console window opens (keep it open; close it to
    quit) and the app opens in your browser.
 4. In the app:
-   1. **Track and car**: from your recordings and the expert laps.
+   1. **Track and car**: from your recordings and the online leaderboard.
    2. **Telemetry folder**: found through Steam if possible; otherwise
       **Browse…** to LMU's `UserData\Telemetry`. It's remembered.
    3. **Your lap**: your timed laps for that track and car, fastest first.
-   4. **Compare against**: an expert lap (★), your own best lap, or your
-      fastest time through each section (a theoretical best lap).
+   4. **Compare against**: a lap from the online leaderboard, your own best
+      lap, or your fastest time through each section (a theoretical best
+      lap). Saved expert laps (★) appear here too.
 
    The comparison shows traces (time gap, speed, pedals, steering, line, gear)
    next to a track map with both driving lines and the track edges. Hover the

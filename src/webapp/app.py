@@ -115,7 +115,7 @@ def create_app(
             dcc.Store(id="sync-focus"), dcc.Store(id="sync-reset"),
             html.Header([
                 html.H1("LMU Lap Analyser"),
-                html.P("Compare your Le Mans Ultimate laps with an expert lap, corner by corner.",
+                html.P("Compare your Le Mans Ultimate laps with faster ones, corner by corner.",
                        className="muted"),
             ]),
             html.Section(className="panel steps", children=[
@@ -344,7 +344,7 @@ def create_app(
                 {"label": "Your fastest time in each section", "value": SELF_SECTIONS},
             ]
         values = [o["value"] for o in options]
-        empty = ("" if same or online else "No expert laps for this car yet.") + online_note
+        empty = ("" if same or online else "No other drivers' laps for this car yet.") + online_note
         if current in values:
             return options, current, empty
         return options, (values[0] if values else None), empty
