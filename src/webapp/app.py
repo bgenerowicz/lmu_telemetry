@@ -332,15 +332,16 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
 
     geometry = track_geometry(ref, list(a.laps.values()))
     graph_config = {"displaylogo": False}
-    viz = [html.Div(className="viz-traces", children=dcc.Graph(
-        id="traces", figure=traces_figure(lap, ref, a.segments, lap_label, ref_label, geometry),
-        config=graph_config,
-    ))]
+    viz = []
     if geometry is not None:
-        viz.append(html.Div(className="viz-map", children=dcc.Graph(
+        viz.append(dcc.Graph(
             id="map", figure=map_figure(geometry, lap, ref, a.segments, lap_label, ref_label),
             config={**graph_config, "scrollZoom": True},
-        )))
+        ))
+    viz.append(dcc.Graph(
+        id="traces", figure=traces_figure(lap, ref, a.segments, lap_label, ref_label, geometry),
+        config=graph_config,
+    ))
 
     children = [
         dcc.Store(id="segments", data=[[s.start_m, s.end_m] for s in a.segments]),
@@ -353,8 +354,8 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
             ]) for k, v, sub in cards
         ]),
         html.Div(className="row mt viz-help", children=[
-            html.Span("Drag across the traces to zoom in; the map follows. On the map, scroll "
-                      "to zoom and drag to move. Click a section below to jump to it.",
+            html.Span("On the map, scroll to zoom and drag to move. Drag across the traces to "
+                      "zoom in; the map follows. Click a section below to jump to it.",
                       className="muted grow-text"),
             html.Button("Reset zoom", id="reset-zoom", className="btn"),
         ]),
@@ -593,9 +594,8 @@ _INDEX = """<!DOCTYPE html>
   .finding .lost { margin-left: auto; font-weight: 600; color: #b42318; font-variant-numeric: tabular-nums; }
   .finding ul { margin: 4px 0 0; padding-left: 20px; }
   .gains { background: #e7f6ec; border: 1px solid #b7e1c3; padding: 8px 14px; border-radius: 8px; }
-  .viz { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; margin-top: 8px; }
-  @media (max-width: 1000px) { .viz { grid-template-columns: 1fr; } }
-  .viz-map { border-left: 1px solid #eceef2; }
+  .viz { margin-top: 8px; }
+  #map { border-bottom: 1px solid #eceef2; margin-bottom: 8px; }
   .viz-help { justify-content: space-between; }
   .grow-text { flex: 1; }
   .finding { cursor: pointer; }

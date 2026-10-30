@@ -72,7 +72,7 @@ def traces_figure(
     fig.update_xaxes(title_text="Distance (m)", row=n_rows, col=1)
     fig.update_yaxes(title_text="Δt (s)", row=1, col=1)
     fig.update_layout(
-        height=1000, hovermode="x unified", margin=dict(l=50, r=10, t=40, b=40),
+        height=950, hovermode="x unified", margin=dict(l=50, r=10, t=40, b=40),
         legend=dict(orientation="h", x=0, y=1.02, xanchor="left", yanchor="bottom"),
         plot_bgcolor="#f7f8fa", paper_bgcolor="white", dragmode="zoom",
         uirevision="traces",
@@ -137,7 +137,7 @@ def map_figure(
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
     fig.update_layout(
-        height=1000, margin=dict(l=0, r=0, t=40, b=0), dragmode="pan",
+        height=620, margin=dict(l=0, r=0, t=40, b=0), dragmode="pan",
         legend=dict(orientation="h", x=0, y=1.0, xanchor="left", yanchor="bottom"),
         plot_bgcolor="white", paper_bgcolor="white", hovermode="closest",
         uirevision="map",
