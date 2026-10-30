@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 uploader = ["watchdog>=4.0", "httpx>=0.27"]
 server = ["fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9", "httpx>=0.27"]
-webapp = ["dash>=2.16,<5", "plotly>=5.20"]
+webapp = ["dash>=2.16,<5", "plotly>=5.20", "httpx>=0.27"]
 dev = ["pytest>=8.0", "ruff>=0.4"]
 
 [tool.setuptools.packages.find]

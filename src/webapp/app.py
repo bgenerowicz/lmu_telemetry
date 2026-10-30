@@ -7,8 +7,13 @@ or your fastest time through each section), and read the analysis.
 
 from __future__ import annotations
 
+import os
+import secrets
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlencode
+
+import flask
 
 from dash import (
     ALL,
@@ -33,6 +38,7 @@ from lmu_core.library import (
     scan_folder,
 )
 from webapp.charts import map_figure, traces_figure
+from webapp.server_client import ServerClient, ServerError
 
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 SELF_BEST = "self:best"
@@ -45,9 +51,41 @@ def create_app(
     reference_dirs: list[Path],
     user_reference_dir: Path,
     initial_folder: str = "",
-    on_folder_scanned: Callable[[str], None] | None = None,
     choose_folder: Callable[[str | None], str | None] | None = None,
+    settings: dict | None = None,
+    save_settings: Callable[[dict], None] | None = None,
+    cache_dir: Path | None = None,
 ) -> Dash:
+    """``settings`` (telemetry folder, server address and sign-in) is updated in
+    place and passed to ``save_settings`` whenever it changes."""
+    settings = settings if settings is not None else {}
+    initial_folder = initial_folder or settings.get("telemetry_dir", "")
+    cache_dir = Path(cache_dir) if cache_dir else user_reference_dir.parent / "cache"
+    clients: dict[tuple, ServerClient] = {}
+
+    def remember(**changes) -> None:
+        if any(settings.get(k) != v for k, v in changes.items()):
+            settings.update(changes)
+            if save_settings:
+                save_settings(settings)
+
+    def server() -> ServerClient | None:
+        """Client for the configured server (kept, so its cache survives), or None."""
+        url = (settings.get("server_url") or "").strip()
+        if not url:
+            return None
+        key = (url, settings.get("server_token"))
+        if key not in clients:
+            clients.clear()
+            clients[key] = ServerClient(url, settings.get("server_token"))
+        return clients[key]
+
+    def server_boards() -> list[dict]:
+        try:
+            return server().leaderboards() if server() else []
+        except ServerError:
+            return []
+
     # Results (graphs, findings) are created by a callback, so callbacks on them
     # are registered before the components exist.
     app = Dash(__name__, title="LMU Lap Analyser", update_title=None,
@@ -63,6 +101,7 @@ def create_app(
         children=[
             dcc.Store(id="recordings", data=[]),
             dcc.Store(id="refs-version", data=0),
+            dcc.Store(id="server-version", data=0),
             # Outputs for the browser-side callbacks that link traces and map.
             dcc.Store(id="sync-hover"), dcc.Store(id="sync-zoom"),
             dcc.Store(id="sync-focus"), dcc.Store(id="sync-reset"),
@@ -91,6 +130,18 @@ def create_app(
                     html.Div(id="scan-status", className="muted mt"),
                 ]),
             ]),
+            html.Section(className="panel server", children=[
+                html.Div("Online leaderboard", className="step-title"),
+                html.Div(className="row", children=[
+                    dcc.Input(id="server-url", value=settings.get("server_url", ""),
+                              debounce=True, placeholder="https://lmu.example.com",
+                              className="grow"),
+                    html.A("Sign in with Steam", id="sign-in", href="/server-login",
+                           className="btn"),
+                    html.Button("Sign out", id="sign-out", className="btn"),
+                ]),
+                html.Div(id="server-status", className="muted mt"),
+            ]),
             html.Section(className="panel two-col", children=[
                 html.Div([
                     html.Div("3. Your lap", className="step-title"),
@@ -114,10 +165,13 @@ def create_app(
                     html.Div("4. Compare against", className="step-title"),
                     dcc.RadioItems(id="reference", className="radio-list"),
                     html.Div(id="reference-empty", className="muted"),
-                    html.Div(className="row mt", children=[
+                    html.Div(className="row mt wrap", children=[
+                        html.Button("Upload selected lap to the leaderboard", id="upload",
+                                    className="btn primary"),
                         html.Button("Save selected lap as expert lap", id="save-ref",
                                     className="btn"),
                     ]),
+                    dcc.Loading(html.Div(id="upload-status", className="mt"), type="dot"),
                     html.Div(id="save-status", className="muted mt"),
                 ]),
             ]),
@@ -142,8 +196,7 @@ def create_app(
         if not Path(folder).is_dir():
             return [], f"Folder not found: {folder}"
         infos, errors = scan_folder(folder)
-        if on_folder_scanned:
-            on_folder_scanned(folder)
+        remember(telemetry_dir=folder)
         laps = sum(len(i.laps) for i in infos)
         status = f"{len(infos)} recordings, {laps} timed laps."
         if errors:
@@ -152,15 +205,18 @@ def create_app(
 
     @app.callback(
         Output("track", "options"), Output("track", "value"),
-        Input("recordings", "data"), Input("refs-version", "data"), State("track", "value"),
+        Input("recordings", "data"), Input("refs-version", "data"),
+        Input("server-version", "data"), State("track", "value"),
     )
-    def tracks(recordings, _, current):
+    def tracks(recordings, _, __, current):
         refs = references()
-        names = {r["track"] for r in recordings} | {r.track for r in refs}
+        boards = server_boards()
+        names = {r["track"] for r in recordings} | {r.track for r in refs} | {b["track"] for b in boards}
         options = []
         for t in sorted(names):
             mine = sum(len(r["laps"]) for r in recordings if r["track"] == t)
-            experts = sum(1 for r in refs if r.track == t)
+            experts = sum(1 for r in refs if r.track == t) + sum(
+                b["laps"] for b in boards if b["track"] == t)
             options.append({"label": f"{t}  ({mine} your laps · {experts} expert)", "value": t})
         if current in names:
             return options, current
@@ -170,20 +226,23 @@ def create_app(
     @app.callback(
         Output("car", "options"), Output("car", "value"),
         Input("track", "value"), Input("recordings", "data"), Input("refs-version", "data"),
-        State("car", "value"),
+        Input("server-version", "data"), State("car", "value"),
     )
-    def cars(track, recordings, _, current):
+    def cars(track, recordings, _, __, current):
         refs = [r for r in references() if r.track == track]
+        boards = [b for b in server_boards() if b["track"] == track]
         mine = [r for r in recordings if r["track"] == track]
-        names = {r["car"] for r in mine} | {r.car for r in refs}
+        names = {r["car"] for r in mine} | {r.car for r in refs} | {b["car"] for b in boards}
         options = []
         for c in sorted(names):
             n_mine = sum(len(r["laps"]) for r in mine if r["car"] == c)
-            n_ref = sum(1 for r in refs if r.car == c)
+            n_ref = sum(1 for r in refs if r.car == c) + sum(
+                b["laps"] for b in boards if b["car"] == c)
             options.append({"label": f"{c}  ({n_mine} your laps · {n_ref} expert)", "value": c})
         if current in names:
             return options, current
-        default = mine[0]["car"] if mine else (refs[0].car if refs else None)
+        default = mine[0]["car"] if mine else (
+            refs[0].car if refs else (boards[0]["car"] if boards else None))
         return options, default
 
     @app.callback(
@@ -208,9 +267,16 @@ def create_app(
         Output("reference", "options"), Output("reference", "value"),
         Output("reference-empty", "children"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
-        Input("refs-version", "data"), State("reference", "value"),
+        Input("refs-version", "data"), Input("server-version", "data"),
+        State("reference", "value"),
     )
-    def reference_options(track, car, recordings, _, current):
+    def reference_options(track, car, recordings, _, __, current):
+        online, online_note = [], ""
+        if server() and track and car:
+            try:
+                online = server().leaderboard(track, car)
+            except ServerError as exc:
+                online_note = f" Online leaderboard: {exc}"
         refs = sorted((r for r in references() if r.track == track), key=lambda r: r.lap_time_s)
         same = [r for r in refs if r.car == car]
         car_class = next((r.car_class for r in same), None) or next(
@@ -218,6 +284,10 @@ def create_app(
         )
         other = [r for r in refs if r.car != car and car_class and r.car_class == car_class]
         options = [
+            {"label": f"#{e['rank']} {e['driver']} · {_fmt_time(e['lap_time_s'])} (online)",
+             "value": f"srv:{e['id']}"}
+            for e in online
+        ] + [
             {"label": f"★ {r.driver or 'Unknown'} · {_fmt_time(r.lap_time_s)}", "value": f"ref:{r.path}"}
             for r in same
         ] + [
@@ -232,7 +302,7 @@ def create_app(
                 {"label": "Your fastest time in each section", "value": SELF_SECTIONS},
             ]
         values = [o["value"] for o in options]
-        empty = "" if same else "No expert laps for this car yet."
+        empty = ("" if same or online else "No expert laps for this car yet.") + online_note
         if current in values:
             return options, current, empty
         return options, (values[0] if values else None), empty
@@ -281,6 +351,13 @@ def create_app(
             best = _my_laps(recordings, track, car)[0]
             ref = load_lap(best["path"], best["lap"])
             ref_label = f"Your best lap {best['lap']} ({best['time']})"
+        elif reference.startswith("srv:"):
+            try:
+                path = server().download_lap(reference.removeprefix("srv:"), cache_dir)
+            except (ServerError, AttributeError) as exc:
+                return html.P(f"Couldn't get that lap from the server: {exc}", className="note")
+            ref = load_reference(path)
+            ref_label = f"{ref.facts.driver or 'Online'} ({_fmt_time(ref.facts.lap_time_s)})"
         else:
             path = reference.removeprefix("ref:")
             ref = load_reference(path)
@@ -295,6 +372,89 @@ def create_app(
         intro = f"Compared with {ref_label}, section by section.{note}"
         return _results_view(analysis, "you", "ref", lap_label, ref_label, intro)
 
+    # --- Online leaderboard ----------------------------------------------------
+
+    login_states: set[str] = set()
+
+    @app.server.route("/server-login")
+    def server_login():
+        if not server():
+            return flask.redirect("/")
+        state = secrets.token_urlsafe(16)
+        login_states.add(state)
+        return_to = flask.request.host_url + "server-callback?" + urlencode({"state": state})
+        # For local testing against a server started with LMU_DEV_LOGIN=1.
+        dev_name = os.environ.get("LMU_DEV_LOGIN_NAME")
+        if dev_name:
+            query = urlencode({"name": dev_name, "return_to": return_to})
+            return flask.redirect(f"{server().url}/auth/dev?{query}")
+        return flask.redirect(f"{server().url}/auth/steam/login?" + urlencode({"return_to": return_to}))
+
+    @app.server.route("/server-callback")
+    def server_callback():
+        # Only accept a token for a sign-in this app started, so another page
+        # can't sign the app into someone else's account.
+        state = flask.request.args.get("state", "")
+        token = flask.request.args.get("token")
+        if state in login_states and token:
+            login_states.discard(state)
+            remember(server_token=token, server_name=flask.request.args.get("name", ""))
+        return flask.redirect("/")
+
+    @app.callback(
+        Output("server-status", "children"), Output("sign-in", "style"),
+        Output("sign-out", "style"),
+        Input("server-url", "value"), Input("server-version", "data"),
+    )
+    def server_status(url, _):
+        url = (url or "").strip().rstrip("/")
+        if url != settings.get("server_url", ""):
+            # A different server: the old sign-in doesn't apply.
+            remember(server_url=url, server_token=None, server_name=None)
+        hide, show = {"display": "none"}, {}
+        if not url:
+            return "Add the leaderboard server's address to upload laps and compare with them.", hide, hide
+        try:
+            health = server().health()
+        except ServerError as exc:
+            return str(exc), hide, hide
+        rules = f"Ruleset: {health.get('ruleset')}."
+        if not settings.get("server_token"):
+            return f"Connected. Sign in to upload laps. {rules}", show, hide
+        try:
+            me = server().me()
+        except ServerError as exc:
+            return f"{exc} {rules}", show, hide
+        return f"Signed in as {me['name']}. {rules}", hide, show
+
+    @app.callback(
+        Output("server-version", "data", allow_duplicate=True),
+        Input("sign-out", "n_clicks"), State("server-version", "data"),
+        prevent_initial_call=True,
+    )
+    def sign_out(_, version):
+        remember(server_token=None, server_name=None)
+        return version + 1
+
+    @app.callback(
+        Output("upload-status", "children"),
+        Output("server-version", "data", allow_duplicate=True),
+        Input("upload", "n_clicks"),
+        State("laps", "data"), State("laps", "selected_rows"), State("server-version", "data"),
+        prevent_initial_call=True,
+    )
+    def upload(_, rows, selected, version):
+        if not rows or not selected:
+            return html.P("Select one of your laps first.", className="muted"), no_update
+        if not server():
+            return html.P("Add the leaderboard server's address first.", className="muted"), no_update
+        row = rows[selected[0]]
+        try:
+            result = server().upload_lap(row["path"], row["lap"])
+        except ServerError as exc:
+            return html.P(str(exc), className="note"), no_update
+        return _upload_view(result, row), version + 1
+
     # Linking traces and map happens in the browser (_SYNC_JS, in the page head):
     # moving markers and zooming must feel instant and keep the user's view.
     app.clientside_callback(ClientsideFunction("lmu", "onHover"), Output("sync-hover", "data"),
@@ -308,6 +468,19 @@ def create_app(
                             Input("reset-zoom", "n_clicks"), prevent_initial_call=True)
 
     return app
+
+
+def _upload_view(result: dict, row: dict) -> html.Div:
+    """The server's verdict on an upload, with the reasons if it was turned down."""
+    if result.get("accepted"):
+        return html.Div(className="gains", children=result.get("message", "Uploaded."))
+    # The reason already covers rule problems; list failed checks (tampering, gaps).
+    failed = [c for c in result.get("checks", []) if not c["ok"]]
+    details = [html.Li(f"{c['name']}: {c['detail']}") for c in failed]
+    return html.Div(className="note", children=[
+        html.Div(f"Lap {row['lap']} ({row['time']}): {result.get('reason', '')}"),
+        html.Ul(details) if details else None,
+    ])
 
 
 def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
@@ -575,6 +748,10 @@ _INDEX = """<!DOCTYPE html>
   .btn { padding: 7px 14px; border: 1px solid #cfd4db; border-radius: 6px; background: #fff;
          font: inherit; cursor: pointer; white-space: nowrap; }
   .btn:hover { background: #f0f2f5; }
+  a.btn { color: inherit; text-decoration: none; display: inline-block; }
+  .btn.primary { background: #1f6fd1; border-color: #1f6fd1; color: #fff; }
+  .btn.primary:hover { background: #1a5fb4; }
+  .wrap { flex-wrap: wrap; }
   .radio-list label { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
                       border-radius: 6px; cursor: pointer; }
   .radio-list label:hover { background: #f4f5f7; }

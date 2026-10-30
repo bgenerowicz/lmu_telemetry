@@ -4,7 +4,8 @@
     lmu-analyser.exe --port 8050     fixed port instead of a free one
     lmu-analyser.exe --no-browser    don't open the browser
 
-The telemetry folder is remembered in Documents/LMU Lap Analyser/settings.json.
+The telemetry folder, server address and sign-in are remembered in
+Documents/LMU Lap Analyser/settings.json.
 """
 
 from __future__ import annotations
@@ -28,18 +29,16 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = paths.load_settings()
     folder = settings.get("telemetry_dir") or str(paths.find_telemetry_dir() or "")
-
-    def remember(folder: str) -> None:
-        if settings.get("telemetry_dir") != folder:
-            settings["telemetry_dir"] = folder
-            paths.save_settings(settings)
+    settings.setdefault("server_url", paths.DEFAULT_SERVER_URL)
 
     app = create_app(
         reference_dirs=[paths.bundled_references_dir()],
         user_reference_dir=paths.user_references_dir(),
         initial_folder=folder,
-        on_folder_scanned=remember,
         choose_folder=paths.choose_folder,
+        settings=settings,
+        save_settings=paths.save_settings,
+        cache_dir=paths.app_dir() / "cache",
     )
 
     port = args.port or _free_port()

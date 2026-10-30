@@ -264,10 +264,9 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
     report = ruleset.check(v.facts)
     rules = [dataclasses.asdict(r) for r in report.results]
     if not report.accepted:
-        return 422, _rejected(
-            "The lap doesn't meet the rules: "
-            + "; ".join(r.message for r in report.problems if r.rejects) + ".",
-            checks=checks, rules=rules)
+        limits = next((c.detail for c in v.checks if c.name.startswith("track limits")), "")
+        reasons = [_rule_reason(r, limits) for r in report.problems if r.rejects]
+        return 422, _rejected("Not added: " + "; ".join(reasons) + ".", checks=checks, rules=rules)
 
     key = (ruleset.id, f.track, f.layout, f.car)
     board = "ruleset_id = ? AND track = ? AND layout IS ? AND car = ?"
@@ -318,6 +317,21 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         "message": f"Accepted: #{rank} on {f.track} in the {f.car}.",
         "checks": checks, "rules": rules,
     }
+
+
+def _rule_reason(result, track_limits: str) -> str:
+    """A ruleset problem in plain words."""
+    if result.field == "is_valid":
+        if result.status == "fail":
+            return "it went " + track_limits.replace("off track: ", "off track (") + ")"
+        return "track limits couldn't be checked"
+    if result.field == "is_flying":
+        return "it isn't a complete timed lap"
+    if result.field == "rain_pct":
+        return "it was raining"
+    if result.field == "track_wetness_pct":
+        return "the track was wet"
+    return result.message
 
 
 def _known_length(con: sqlite3.Connection, track: str | None, layout: str | None) -> float | None:

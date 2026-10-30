@@ -182,7 +182,8 @@ def test_off_track_lap_rejected_by_rules(tmp_path, extracts):
     client, _ = make_client(tmp_path)
     r = upload(client, sign_in(client, "Alice"), extracts[1])
     assert r.status_code == 422
-    assert "is_valid" in r.json()["reason"]
+    assert r.json()["reason"] == (
+        "Not added: it went off track (4.3 m beyond the track edge at 2771 m).")
 
 
 def test_tampered_and_garbage_uploads_rejected(tmp_path, extracts):

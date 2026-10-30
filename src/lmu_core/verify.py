@@ -89,8 +89,8 @@ def verify_lap(rec: Recording, lap_number: int, track_length_m: float | None = N
 
     off_m, off_at = _off_track(p)
     valid = off_m <= OFF_TRACK_M
-    checks_detail = (f"at most {off_m:.1f} m beyond the track edge"
-                     + ("" if valid else f" (at {off_at:.0f} m): off track"))
+    checks_detail = (f"at most {off_m:.1f} m beyond the track edge" if valid
+                     else f"off track: {off_m:.1f} m beyond the track edge at {off_at:.0f} m")
     v.facts = dataclasses.replace(lap_facts(rec, lap), is_valid=valid if off_m >= 0 else None)
     v.processed = dataclasses.replace(p, facts=v.facts)
     checks.append(Check("track limits (informational)", True, checks_detail))

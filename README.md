@@ -32,6 +32,13 @@ where you lose time and why, with traces and a track map.
    the "where you lose time" sections, to zoom the map to that stretch. Scroll
    on the map to zoom, drag to move.
 
+**Online leaderboard**: enter the server's address, **Sign in with Steam**,
+and **Upload selected lap to the leaderboard**. The server checks the lap
+itself (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#uploads)) and keeps
+each driver's best lap, top 10 per track and car, under the current
+[ruleset](rulesets/loose-v1.yaml). Laps on the leaderboard appear under
+**Compare against** as "(online)".
+
 **Save selected lap as expert lap** stores a lap in
 `Documents\LMU Lap Analyser\references`, where the app picks it up. To ship
 it with the app for everyone, copy it to [`references/`](references/) and
@@ -44,6 +51,23 @@ From source, on any OS:
 
 ```bash
 python -m desktop
+```
+
+## Leaderboard server
+
+`src/server`: FastAPI + SQLite, Sign in with Steam. Deployment:
+[deploy/README.md](deploy/README.md). To try it locally with the app, start a
+server that allows sign-in without Steam:
+
+```bash
+LMU_DEV_LOGIN=1 python -m server --port 8000
+```
+
+then start the app signed in as a made-up user, and enter
+`http://127.0.0.1:8000` as the server address:
+
+```bash
+LMU_DEV_LOGIN_NAME=Alice python -m desktop
 ```
 
 ## How it fits together
@@ -65,10 +89,11 @@ src/lmu_core/   analysis shared by everything (ruleset, reader, laps, segments,
                 analysis, library of recordings and reference laps)
 src/webapp/     the Dash app: track/car, folder, laps, reference, results
 src/desktop/    launcher: settings, finding LMU's folder, runs the app locally
+src/server/     leaderboard server (Steam sign-in, verified uploads)
+deploy/         Docker, Caddy and .env files for the server
 references/     expert reference laps shipped with the app (.lap.npz)
 packaging/      PyInstaller entry point and exe smoke test
 src/uploader/   folder watcher + upload           (not started)
-src/server/     FastAPI leaderboard server        (not started)
 rulesets/       standard-conditions rulesets (YAML)
 samples/        raw LMU recordings for development
 docs/           architecture and format docs

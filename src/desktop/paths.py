@@ -10,6 +10,8 @@ from pathlib import Path
 
 APP_NAME = "LMU Lap Analyser"
 LMU_TELEMETRY = Path("steamapps", "common", "Le Mans Ultimate", "UserData", "Telemetry")
+# The public leaderboard server; empty until it is deployed. Users can change it in the app.
+DEFAULT_SERVER_URL = ""
 
 
 def app_dir() -> Path:
