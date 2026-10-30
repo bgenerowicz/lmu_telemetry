@@ -137,7 +137,7 @@ def map_figure(
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
     fig.update_layout(
-        height=620, margin=dict(l=0, r=0, t=40, b=0), dragmode="pan",
+        height=560, margin=dict(l=0, r=0, t=40, b=0), dragmode="pan",
         legend=dict(orientation="h", x=0, y=1.0, xanchor="left", yanchor="bottom"),
         plot_bgcolor="white", paper_bgcolor="white", hovermode="closest",
         uirevision="map",
