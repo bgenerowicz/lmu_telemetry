@@ -146,6 +146,10 @@ def test_candidates_are_laps_that_would_make_the_leaderboard(server_url):
     [c] = find_candidates(recordings, ruleset, entries(bob))
     assert (c.lap, c.rank) == (2, 2)
     assert find_candidates(recordings, ruleset, entries(bob), skip={c.key}) == []
+    # Signed out, the board doesn't say whose laps are whose: lap 3 there is one
+    # of this folder's laps, so taken to be yours, and lap 2 is slower.
+    signed_out = ServerClient(server_url)
+    assert find_candidates(recordings, ruleset, entries(signed_out), signed_in=False) == []
 
 
 def test_app_lists_laps_to_upload_and_uploads_only_picked_ones(server_url, tmp_path):

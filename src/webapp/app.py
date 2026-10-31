@@ -673,7 +673,8 @@ def create_app(
                 return server().leaderboard(track, car, **filters)
             return server().class_leaderboard(track, car_class, **filters)
 
-        return find_candidates(recordings, ruleset, entries_for, skip=tried)
+        return find_candidates(recordings, ruleset, entries_for, skip=tried,
+                               signed_in=bool(settings.get("server_token")))
 
     def _upload(found):
         results, accepted = [], False

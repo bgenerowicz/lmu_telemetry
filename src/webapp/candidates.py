@@ -43,12 +43,16 @@ def find_candidates(
     ruleset: Ruleset,
     entries_for: Callable[[str, str, str | None, tuple | None], list[dict]],
     skip: set[str] = frozenset(),
+    signed_in: bool = True,
 ) -> list[Candidate]:
     """``recordings``: the app's scanned recordings. ``entries_for(track, car,
     car_class, band)``: the leaderboard laps a lap of that car (and band: setup
     fixed, track temperature band, fuel band; None when laps aren't kept per band)
     competes with, each with ``lap_time_s``, ``layout``, ``recorded_at`` and
-    ``mine``. ``skip``: lap keys not to suggest again (e.g. already tried)."""
+    ``mine``. ``skip``: lap keys not to suggest again (e.g. already tried).
+    Signed out, the server doesn't say which laps are ``mine``; then laps on the
+    board that are one of ``recordings``' laps (same recording, same lap time)
+    are taken to be."""
     per_band = bool(set(BAND_FIELDS) & set(ruleset.top_n_per))
     groups = defaultdict(list)
     for r in recordings:
@@ -63,8 +67,10 @@ def find_candidates(
     for (track, layout, car, car_class, band), laps in sorted(groups.items(), key=str):
         entries = [e for e in entries_for(track, car, car_class, band)
                    if e.get("layout") == layout]
-        mine = min((e["lap_time_s"] for e in entries if e.get("mine")), default=None)
-        others = [e for e in entries if not e.get("mine")]
+        yours = [e for e in entries
+                 if (e.get("mine") if signed_in else _from_these(e, recordings))]
+        mine = min((e["lap_time_s"] for e in yours), default=None)
+        others = [e for e in entries if e not in yours]
         checks = 0
         for seconds, r, number in sorted(laps, key=lambda x: x[0]):
             if mine is not None and seconds >= mine - 0.0005:
@@ -82,6 +88,11 @@ def find_candidates(
                                        describe(*band) if band else ""))
                 break
     return found
+
+
+def _from_these(entry: dict, recordings: list[dict]) -> bool:
+    """The board's lap is one of these recordings' laps."""
+    return any(_already_there([entry], r, seconds) for r in recordings for _, seconds in r["laps"])
 
 
 def _already_there(entries: list[dict], recording: dict, seconds: float) -> bool:
