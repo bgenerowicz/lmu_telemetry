@@ -26,10 +26,11 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, RedirectResponse,
+                               Response)
 
 from lmu_core.bands import BAND_FIELDS, FUEL_LABELS, describe, track_temp_band
 from lmu_core.laps import lap_facts, split_laps
@@ -37,7 +38,7 @@ from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap, resample_lap
 from lmu_core.ruleset import Ruleset
 from lmu_core.verify import verify_lap
-from server import db, steam
+from server import db, guide, steam
 from server.config import Settings
 
 # Track length is checked against earlier accepted laps once there are this many.
@@ -48,6 +49,14 @@ STORED_FIELDS = {"track", "layout", "car", "car_class", "car_model", *BAND_FIELD
 # name instead), and internals.
 _PRIVATE_LAP_COLUMNS = ("report_json", "user_id", "file_hash", "driver_name")
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+# For search engines and link previews.
+SITE_DESCRIPTION = ("Free Le Mans Ultimate (LMU) telemetry analyser for Windows: compare your "
+                    "laps with the online leaderboard corner by corner, with traces, a track "
+                    "map and car setups.")
+REPO_URL = "https://github.com/bgenerowicz/lmu_telemetry"
+DOWNLOAD_URL = REPO_URL + "/releases/latest/download/lmu-analyser.exe"
+PREVIEW_IMAGE = ("https://raw.githubusercontent.com/bgenerowicz/lmu_telemetry/main/"
+                 "docs/images/comparison.png")
 
 
 def create_app(
@@ -269,19 +278,80 @@ def create_app(
 
     # --- Pages ---------------------------------------------------------------
 
+    home_url = settings.public_url
+
+    def board_path(track: str, car: str) -> str:
+        return f"/leaderboards/{quote(track, safe='')}/{quote(car, safe='')}"
+
     @app.get("/", response_class=HTMLResponse)
     def home(con=Depends(get_con)) -> str:
         boards = leaderboards(con)
         rows = "".join(
             f"<tr><td>{html.escape(b['track'])}</td>"
-            f"<td>{html.escape(b['car_model'] or b['car'])}</td>"
+            f"<td><a href='{home_url}{board_path(b['track'], b['car_model'] or b['car'])}'>"
+            f"{html.escape(b['car_model'] or b['car'])}</a></td>"
             f"<td>{b['laps']}</td><td>{_fmt_time(b['best'])}</td></tr>" for b in boards
         ) or "<tr><td colspan=4>No laps yet.</td></tr>"
         return _page("LMU Lap Analyser", (
-            f"<p>Leaderboards for <b>{html.escape(ruleset.name)}</b>: "
+            "<p>A free <b>Le Mans Ultimate telemetry</b> analyser for Windows. Compare "
+            "your laps with your own best or with faster drivers' laps from the leaderboards "
+            "below, and see corner by corner where you lose time and why: time gap, speed, "
+            "pedals, steering, line, RPM and gear, a track map, and both cars' setups.</p>"
+            f"<p><a href='{DOWNLOAD_URL}'><b>Download the app</b></a> · "
+            f"<a href='{REPO_URL}'>Source and instructions</a> · "
+            f"<a href='{home_url}{guide.PATH}'>How to read LMU telemetry files</a></p>"
+            f"<img src='{PREVIEW_IMAGE}' alt='Comparing a lap with the leaderboard: traces "
+            "against distance next to a track map coloured by where time is lost' "
+            "style='max-width:100%;height:auto;border:1px solid #e2e5ea'>"
+            f"<h2>Leaderboards</h2><p><b>{html.escape(ruleset.name)}</b>: "
             f"{html.escape(ruleset.description)}</p>"
             "<table><tr><th>Track</th><th>Car</th><th>Drivers</th><th>Best</th></tr>"
-            f"{rows}</table><p><a href=privacy>Privacy</a></p>"))
+            f"{rows}</table><p><a href='{home_url}/privacy'>Privacy</a></p>"),
+            description=SITE_DESCRIPTION, url=home_url + "/",
+            heading="LMU Lap Analyser: Le Mans Ultimate telemetry and leaderboards")
+
+    @app.get("/leaderboards/{track}/{car}", response_class=HTMLResponse)
+    def board_page(track: str, car: str, con=Depends(get_con)) -> str:
+        """One car's leaderboard at a track, as a page (``car``: the model)."""
+        # As the API has it, signed out (and without its Query/Header defaults).
+        entries = (leaderboard(track, car_model=car, fuel=None, con=con, authorization=None)
+                   or leaderboard(track, car=car, fuel=None, con=con, authorization=None))
+        if not entries:
+            raise HTTPException(404, "No such leaderboard.")
+        layouts = len({e["layout"] for e in entries}) > 1
+        best = entries[0]["lap_time_s"]
+        rows = []
+        for e in entries:
+            gap = "" if e["rank"] == 1 else f"+{e['lap_time_s'] - best:.3f}"
+            layout = f"<td>{html.escape(e['layout'] or '')}</td>" if layouts else ""
+            rows.append(f"<tr><td>{e['rank']}</td><td>{html.escape(e['driver'])}</td>"
+                        f"<td>{_fmt_time(e['lap_time_s'])}</td><td>{gap}</td>{layout}"
+                        f"<td>{html.escape(_conditions(e))}</td></tr>")
+        return _page(f"{car} at {track}: LMU leaderboard", (
+            f"<p>The fastest Le Mans Ultimate laps in the {html.escape(car)} at "
+            f"{html.escape(track)} ({html.escape(ruleset.name)}): each driver's best in "
+            "each set of conditions. Every lap here comes with its telemetry and car setup: "
+            f"compare yours with any of them in <a href='{home_url}/'>LMU Lap Analyser</a>.</p>"
+            "<table><tr><th>#</th><th>Driver</th><th>Lap</th><th>Gap</th>"
+            + ("<th>Layout</th>" if layouts else "") + "<th>Conditions</th></tr>"
+            + "".join(rows) + f"</table><p><a href='{home_url}/'>All leaderboards</a></p>"),
+            description=(f"Le Mans Ultimate leaderboard for the {car} at {track}: lap times "
+                         "with telemetry and car setups, from LMU Lap Analyser."),
+            url=home_url + board_path(track, car))
+
+    @app.get(guide.PATH, response_class=HTMLResponse)
+    def guide_page() -> str:
+        return _page(guide.TITLE, guide.BODY.format(home=home_url),
+                     description=guide.DESCRIPTION, url=home_url + guide.PATH)
+
+    @app.get("/sitemap.xml")
+    def sitemap(con=Depends(get_con)) -> Response:
+        paths = ["/", guide.PATH] + [board_path(b["track"], b["car_model"] or b["car"])
+                                     for b in leaderboards(con)]
+        urls = "".join(f"<url><loc>{html.escape(home_url + p)}</loc></url>" for p in paths)
+        return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                        f"{urls}</urlset>", media_type="application/xml")
 
     @app.get("/privacy", response_class=HTMLResponse)
     def privacy() -> str:
@@ -569,14 +639,40 @@ def _fmt_time(seconds: float) -> str:
     return f"{int(m)}:{s:06.3f}"
 
 
-def _page(title: str, body: str) -> str:
+def _conditions(entry: dict) -> str:
+    """A leaderboard lap's conditions, in words."""
+    setup = {1: "fixed setup", 0: "open setup"}.get(entry.get("setup_fixed"))
+    temp = entry.get("track_temp_c")
+    fuel = FUEL_LABELS.get(entry.get("fuel_band"))
+    return ", ".join(p for p in (
+        entry.get("session_type"), entry.get("weather"), setup,
+        f"track {temp:.0f}°C" if temp is not None else None,
+        f"{fuel} fuel" if fuel else None) if p)
+
+
+def _page(title: str, body: str, description: str | None = None, url: str | None = None,
+          heading: str | None = None) -> str:
+    """A server page; ``description`` and ``url`` (its address) are for search
+    engines and link previews."""
+    meta = ""
+    if description:
+        meta += (f"<meta name=description content='{html.escape(description)}'>"
+                 f"<meta property='og:description' content='{html.escape(description)}'>")
+    if url:
+        meta += (f"<link rel=canonical href='{html.escape(url)}'>"
+                 f"<meta property='og:url' content='{html.escape(url)}'>")
+    meta += (f"<meta property='og:title' content='{html.escape(title)}'>"
+             "<meta property='og:type' content='website'>"
+             "<meta property='og:site_name' content='LMU Lap Analyser'>"
+             f"<meta property='og:image' content='{PREVIEW_IMAGE}'>"
+             "<meta name='twitter:card' content='summary_large_image'>")
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width, initial-scale=1'>"
-        f"<title>{html.escape(title)}</title><style>"
+        f"<title>{html.escape(title)}</title>{meta}<style>"
         "body{font:15px/1.5 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:24px 16px;"
         "color:#1d2128;background:#fff}table{border-collapse:collapse}"
         "td,th{padding:4px 12px;border-bottom:1px solid #e2e5ea;text-align:left}"
         "pre{background:#f4f5f7;padding:10px;overflow-x:auto}</style></head>"
-        f"<body><h1>{html.escape(title)}</h1>{body}</body></html>"
+        f"<body><h1>{html.escape(heading or title)}</h1>{body}</body></html>"
     )

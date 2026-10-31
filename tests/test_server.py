@@ -445,6 +445,28 @@ def test_leaderboard_marks_your_own_laps(tmp_path, extracts):
     assert [e["mine"] for e in client.get("/api/leaderboard", params=params).json()] == [False]
 
 
+def test_pages_for_search_engines(tmp_path, extracts):
+    client, _ = make_client(tmp_path)
+    upload(client, sign_in(client, "Alice"), extracts[3])
+    home = client.get("/").text
+    assert "<meta name=description" in home and "og:image" in home
+    assert "<link rel=canonical href='https://lmu.example.com/'>" in home
+    # Each leaderboard has its own page, linked from the home page and the sitemap.
+    board = "https://lmu.example.com/leaderboards/Algarve%20International%20Circuit/McLaren%20720S%20GT3"
+    assert f"href='{board}'" in home
+    page = client.get(board.removeprefix("https://lmu.example.com"))
+    assert page.status_code == 200
+    assert "McLaren 720S GT3 at Algarve International Circuit: LMU leaderboard" in page.text
+    assert "Alice" in page.text and "open setup" in page.text
+    assert client.get("/leaderboards/Nowhere/McLaren%20720S%20GT3").status_code == 404
+    guide = client.get("/guide/telemetry-files")
+    assert guide.status_code == 200 and "UserData\\Telemetry" in guide.text
+    assert "href=\"https://lmu.example.com/\"" in guide.text
+    sitemap = client.get("/sitemap.xml")
+    assert sitemap.headers["content-type"].startswith("application/xml")
+    assert sitemap.text.count("<loc>") == 3 and board in sitemap.text
+
+
 def test_steam_profile_name():
     from server.steam import profile_name
 
