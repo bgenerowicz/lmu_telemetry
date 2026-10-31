@@ -34,10 +34,12 @@ Status: early, but usable.
 3. **Your lap**: your timed laps for that track and car, fastest first.
 4. **Compare against**: a lap from the online leaderboard, your own best lap,
    or your fastest time through each section (a theoretical best lap).
+   **Also show** puts up to two more laps on the traces and map, e.g. the
+   top 3 on the leaderboard.
 
 ![Picking a track and car, the online leaderboard for that class, your laps and the lap to compare against](docs/images/overview.png)
 
-The comparison shows traces (time gap, speed, pedals, steering, line, gear)
+The comparison shows traces (time gap, speed, pedals, steering, line, RPM, gear)
 next to a track map with both driving lines and the track edges. Hover the
 traces to see both cars on the map; drag across the traces, or click one of
 the "where you lose time" sections, to zoom the map to that stretch. Scroll on
@@ -47,6 +49,10 @@ Below that, **Where you lose time** ranks the corners and straights by time
 lost, with what to change in each:
 
 ![Corners ranked by time lost, each with advice such as braking later, carrying more minimum speed or getting on the throttle earlier](docs/images/losses.png)
+
+**Setup** lists the settings where the other laps' car setups differ from
+yours (wing, tyre pressures, springs, brake balance and so on), with every
+setting folded away below.
 
 ### Online leaderboard
 
@@ -59,7 +65,8 @@ To add your own laps, **Sign in with Steam**. The app lists your laps that
 would make the leaderboard; tick the ones you want and click **Upload
 selected laps**. The server checks each lap before adding it: a complete,
 timed lap that stays on track, in the dry. The leaderboard shows your Steam
-name; see the server's privacy page for what it stores.
+name, and others can see each lap's telemetry and car setup; see the server's
+privacy page for what it stores.
 
 ## Running from source
 

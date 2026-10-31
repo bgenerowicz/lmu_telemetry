@@ -56,6 +56,14 @@ def setup_is_fixed(car_setup: str | None) -> bool | None:
     return free < len(usable) / 2
 
 
+def setup_values(car_setup: str | None) -> dict[str, str] | None:
+    """Each setting the car has, as the game shows it ("52.5:47.5", "-2.20 deg"),
+    by key (``VM_BRAKE_BALANCE``, ``WM_CAMBER-W_FL``); None if there's no setup."""
+    values = {key: str(item.get("stringValue", "")).strip()
+              for key, item in _setup_items(car_setup).items() if item.get("available")}
+    return values or None
+
+
 def _setup_items(car_setup: str | None) -> dict[str, dict]:
     try:
         setup = json.loads(car_setup or "")

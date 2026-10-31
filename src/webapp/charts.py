@@ -1,9 +1,9 @@
-"""Plotly figures comparing one lap with a reference lap.
+"""Plotly figures comparing one lap with a reference lap, and up to two more.
 
 Two figures, linked in the browser (see ``_SYNC_JS`` in app.py):
 
-- traces against distance (time gap, speed, pedals, steering, line, gear);
-- a map with both driving lines, which pans and zooms on its own.
+- traces against distance (time gap, speed, pedals, steering, line, rpm, gear);
+- a map with the driving lines, which pans and zooms on its own.
 
 Map traces carry a ``meta`` tag so the browser code can find them.
 """
@@ -25,6 +25,7 @@ ROWS = [
     ("Brake (%)", "brake_pct"),
     ("Steering (%)", "steering_pct"),
     ("Line: lateral position (m, + = right)", "path_lateral_m"),
+    ("RPM", "rpm"),
     ("Gear", "gear"),
 ]
 # Colours have one job each. Which lap: the reference is a neutral "ghost"
@@ -33,6 +34,10 @@ ROWS = [
 # Checked with the dataviz palette validator, including colour-blind separation.
 REF_COLOR = "#52514e"
 LAP_COLOR = "#6250d6"
+# More laps to compare: two hues that stay apart from your lap's and each other
+# (validator, all pairs). A third would be blue (too close to your lap's violet)
+# or yellow (too close to time lost), so there are two.
+EXTRA_COLORS = ["#e87ba4", "#008300"]
 LOSS_COLOR = "#eb6834"
 GAIN_COLOR = "#1baf7a"
 EDGE_COLOR = "#9aa1ac"
@@ -45,9 +50,10 @@ MAP_WINDOW_M = 50
 
 def traces_figure(
     lap: ProcessedLap, ref: ProcessedLap, segments: list[Segment], lap_name: str, ref_name: str,
-    geometry: TrackGeometry | None = None,
+    geometry: TrackGeometry | None = None, extras: list[tuple[str, ProcessedLap]] = (),
 ) -> go.Figure:
-    """Both laps must be on the same distance grid (as in a SessionAnalysis)."""
+    """All laps must be on the same distance grid (as in a SessionAnalysis); ``extras``
+    are more laps to show, by name (at most ``len(EXTRA_COLORS)``)."""
     rows = [r for r in ROWS if r[1] is None or r[1] in ref.data]
     n_rows = len(rows)
     fig = make_subplots(
@@ -56,15 +62,21 @@ def traces_figure(
         subplot_titles=[""] + [t for t, _ in rows[1:]],
     )
     d = ref.distance_m
-    fig.add_trace(go.Scatter(x=d, y=lap.time_s - ref.time_s, name="Δt",
-                             line=dict(color="#222", width=1.5), showlegend=False), 1, 1)
+    # Ref first, your lap last: on top.
+    laps = [(ref_name, ref, REF_COLOR), *((n, p, c) for (n, p), c in zip(extras, EXTRA_COLORS)),
+            (lap_name, lap, LAP_COLOR)]
+    # The gap to the reference: yours alone in black, or one per lap in its colour.
+    for name, p, color in laps[1:]:
+        fig.add_trace(go.Scatter(x=d, y=p.time_s - ref.time_s, name=name, legendgroup=name,
+                                 line=dict(color=color if extras else "#222", width=1.5),
+                                 showlegend=False), 1, 1)
     for row, (_, col) in enumerate(rows[1:], start=2):
         if col == "path_lateral_m" and geometry is not None and geometry.left_edge_m is not None:
             for edge in (geometry.left_edge_m, geometry.right_edge_m):
                 fig.add_trace(go.Scatter(x=d, y=edge, name="Track edge", hoverinfo="skip",
                                          line=dict(color=EDGE_COLOR, width=1, dash="dot"),
                                          showlegend=False), row, 1)
-        for name, p, color in ((ref_name, ref, REF_COLOR), (lap_name, lap, LAP_COLOR)):
+        for name, p, color in laps:
             if col in p.data:
                 fig.add_trace(
                     go.Scatter(x=d, y=p.data[col], name=name, legendgroup=name,
@@ -81,7 +93,7 @@ def traces_figure(
     fig.update_xaxes(title_text="Distance (m)", row=n_rows, col=1)
     fig.update_yaxes(title_text="Δt (s)", row=1, col=1)
     fig.update_layout(
-        height=950, hovermode="x unified", margin=dict(l=50, r=10, t=40, b=40),
+        height=130 * n_rows + 40, hovermode="x unified", margin=dict(l=50, r=10, t=40, b=40),
         legend=dict(orientation="h", x=0, y=1.02, xanchor="left", yanchor="bottom"),
         plot_bgcolor="#f7f8fa", paper_bgcolor="white", dragmode="zoom",
         uirevision="traces",
@@ -91,8 +103,9 @@ def traces_figure(
 
 def map_figure(
     geometry: TrackGeometry, lap: ProcessedLap, ref: ProcessedLap, segments: list[Segment],
-    lap_name: str, ref_name: str,
+    lap_name: str, ref_name: str, extras: list[tuple[str, ProcessedLap]] = (),
 ) -> go.Figure:
+    """Lines are tagged ``<who>-line`` and their hover markers ``<who>-pos``."""
     g = geometry
     d = g.distance_m
     fig = go.Figure()
@@ -124,15 +137,19 @@ def map_figure(
                                   ticksuffix=" s")),
         hoverinfo="skip", showlegend=False,
     ))
-    for name, x, y, color, meta in ((ref_name, ref_x, ref_y, REF_COLOR, "ref-line"),
-                                    (lap_name, lap_x, lap_y, LAP_COLOR, "lap-line")):
+    lines = [(ref_name, ref, REF_COLOR, "ref"),
+             *((n, p, c, f"extra{i}") for i, ((n, p), c) in enumerate(zip(extras, EXTRA_COLORS))),
+             (lap_name, lap, LAP_COLOR, "lap")]
+    for name, p, color, who in lines:
+        x, y = (ref_x, ref_y) if p is ref else (lap_x, lap_y) if p is lap else g.line(p)
         fig.add_trace(go.Scatter(
-            x=x, y=y, mode="lines", name=name, meta=meta, line=dict(color=color, width=2),
-            customdata=d, hovertemplate="%{customdata:.0f} m<extra>" + name + "</extra>",
+            x=x, y=y, mode="lines", name=name, meta=f"{who}-line",
+            line=dict(color=color, width=2), customdata=d,
+            hovertemplate="%{customdata:.0f} m<extra>" + name + "</extra>",
         ))
-    for color, meta in ((REF_COLOR, "ref-pos"), (LAP_COLOR, "lap-pos")):
+    for _, _, color, who in lines:
         fig.add_trace(go.Scatter(
-            x=[], y=[], mode="markers", meta=meta, hoverinfo="skip", showlegend=False,
+            x=[], y=[], mode="markers", meta=f"{who}-pos", hoverinfo="skip", showlegend=False,
             marker=dict(color=color, size=11, line=dict(color="white", width=2)),
         ))
 

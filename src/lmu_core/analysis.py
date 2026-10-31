@@ -8,7 +8,7 @@ was lost and what the faster lap did differently.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -96,7 +96,7 @@ def analyse(laps: dict[str, ProcessedLap], reference: str | None = None) -> Sess
         raise KeyError(f"reference {reference!r} is not one of the laps")
     best = reference or min(laps, key=lambda n: laps[n].time_s[-1])
     ref = laps[best]
-    aligned = {n: _on_grid(p, ref.distance_m) for n, p in laps.items()}
+    aligned = {n: on_grid(p, ref.distance_m) for n, p in laps.items()}
     basis = [aligned[reference]] if reference else list(aligned.values())
     segments = find_segments(_median_lap(basis))
     stats = {n: [segment_stats(p, s) for s in segments] for n, p in aligned.items()}
@@ -227,7 +227,7 @@ def _speed_summary(lap: SegmentStats, ref: SegmentStats) -> str:
     )
 
 
-def _on_grid(lap: ProcessedLap, grid: np.ndarray) -> ProcessedLap:
+def on_grid(lap: ProcessedLap, grid: np.ndarray) -> ProcessedLap:
     """Put a lap on another lap's distance grid.
 
     Track length is estimated per recording, so two recordings can differ by a
@@ -237,7 +237,7 @@ def _on_grid(lap: ProcessedLap, grid: np.ndarray) -> ProcessedLap:
         return lap
     d = lap.distance_m * (grid[-1] / lap.distance_m[-1])
     data = {k: np.interp(grid, d, v) for k, v in lap.data.items() if k != "distance_m"}
-    return ProcessedLap(lap.facts, {"distance_m": grid, **data})
+    return replace(lap, data={"distance_m": grid, **data})
 
 
 def _median_lap(laps: list[ProcessedLap]) -> ProcessedLap:

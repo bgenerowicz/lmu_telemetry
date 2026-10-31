@@ -2,7 +2,8 @@
 
 Flow: pick a track and car, point it at your telemetry folder, pick one of
 your laps and what to compare it against (an expert lap, your own best lap,
-or your fastest time through each section), and read the analysis.
+or your fastest time through each section), optionally more laps to show
+alongside, and read the analysis.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from dash import (
     no_update,
 )
 
-from lmu_core.analysis import Finding, SessionAnalysis, analyse
+from lmu_core.analysis import Finding, SessionAnalysis, analyse, on_grid, segment_stats
 from lmu_core.bands import FUEL_BANDS, FUEL_LABELS, TEMP_BAND_C
 from lmu_core.geometry import track_geometry
 from lmu_core.library import (
@@ -39,14 +40,19 @@ from lmu_core.library import (
     load_references,
     scan_folder,
 )
+from lmu_core.resample import ProcessedLap
 from lmu_core.ruleset import Ruleset
+from lmu_core.setups import SetupRow, compare
 from webapp.candidates import find_candidates
-from webapp.charts import map_figure, traces_figure
+from webapp.charts import EXTRA_COLORS, map_figure, traces_figure
 from webapp.server_client import ServerClient, ServerError, band_filters
 
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 SELF_BEST = "self:best"
 SELF_SECTIONS = "self:sections"
+# One of your laps, as a lap to show alongside: "mine:<path>|<lap>".
+MINE = "mine:"
+MAX_EXTRAS = len(EXTRA_COLORS)
 # Online leaderboard views: the whole class, or one car of it (by its name).
 BOARD_CLASS = "class"
 # The track temperature filter's range; its ends mean "no limit".
@@ -257,6 +263,12 @@ def create_app(
                     html.Div("4. Compare against", className="step-title"),
                     dcc.RadioItems(id="reference", className="radio-list"),
                     html.Div(id="reference-empty", className="muted"),
+                    html.Label(f"Also show (up to {MAX_EXTRAS} more laps)",
+                               className="muted extras-label"),
+                    # In a wrapper, to hide "Select all" (see the CSS).
+                    html.Div(className="extras-pick", children=dcc.Dropdown(
+                        id="extras", multi=True, value=[],
+                        placeholder="More laps on the traces and map")),
                 ]),
             ]),
             dcc.Loading(html.Div(id="results"), type="default"),
@@ -350,12 +362,14 @@ def create_app(
     @app.callback(
         Output("reference", "options"), Output("reference", "value"),
         Output("reference-empty", "children"),
+        Output("extras", "options"), Output("extras", "value"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
         Input("refs-version", "data"), Input("server-version", "data"),
         Input("board", "active_cell"),
-        State("reference", "value"), State("board", "data"),
+        State("reference", "value"), State("board", "data"), State("extras", "value"),
     )
-    def reference_options(track, car, recordings, _, __, clicked, current, board_rows):
+    def reference_options(track, car, recordings, _, __, clicked, current, board_rows,
+                          extras):
         # A click on the online leaderboard picks that lap (rows' ids are lap ids).
         wanted = current
         if clicked and clicked.get("row_id") and ctx.triggered_id == "board":
@@ -414,23 +428,66 @@ def create_app(
                                       f"({picked['conditions']}, online)", "value": wanted})
         values = [o["value"] for o in options]
         empty = ("" if same or online else "No other drivers' laps for this car yet.") + online_note
+        # Laps to show alongside: the same, but any of your laps rather than your
+        # best, and no "fastest sections" (not a lap).
+        extra_options = [o for o in options if o["value"] not in (SELF_BEST, SELF_SECTIONS)] + [
+            {"label": f"Your lap {r['lap']} · {r['time']} ({r['session']})",
+             "value": MINE + r["id"]} for r in mine]
+        kept = [v for v in extras or [] if v in {o["value"] for o in extra_options}]
         if wanted in values:
-            return options, wanted, empty
-        return options, (values[0] if values else None), empty
+            return options, wanted, empty, extra_options, kept
+        return options, (values[0] if values else None), empty, extra_options, kept
+
+    @app.callback(Output("extras", "value", allow_duplicate=True), Input("extras", "value"),
+                  prevent_initial_call=True)
+    def extras_limit(extras):
+        """At most MAX_EXTRAS: picking another drops the first picked."""
+        return extras[-MAX_EXTRAS:] if extras and len(extras) > MAX_EXTRAS else no_update
+
+    def load_choice(choice: str, recordings: list[dict], track: str, car: str
+                    ) -> tuple[ProcessedLap, str]:
+        """A lap picked to compare against or show alongside, and its name.
+        Raises ServerError if it's an online lap the server can't give."""
+        if choice == SELF_BEST:
+            best = _my_laps(recordings, track, car)[0]
+            return (load_lap(best["path"], best["lap"]),
+                    f"Your best lap {best['lap']} ({best['time']})")
+        if choice.startswith(MINE):
+            path, number = choice.removeprefix(MINE).rsplit("|", 1)
+            p = load_lap(path, int(number))
+            return p, f"Your lap {number} ({_fmt_time(p.facts.lap_time_s)})"
+        if choice.startswith("srv:"):
+            if not server():
+                raise ServerError("No leaderboard server set up.")
+            p = load_reference(server().download_lap(choice.removeprefix("srv:"), cache_dir))
+            return p, f"{p.facts.driver or 'Online'} ({_fmt_time(p.facts.lap_time_s)})"
+        p = load_reference(choice.removeprefix("ref:"))
+        return p, f"{p.facts.driver or 'Expert'} ({_fmt_time(p.facts.lap_time_s)})"
 
     @app.callback(
         Output("results", "children"),
-        Input("laps", "selected_rows"), Input("reference", "value"),
+        Input("laps", "selected_rows"), Input("reference", "value"), Input("extras", "value"),
         State("laps", "data"), State("recordings", "data"),
         State("track", "value"), State("car", "value"),
     )
-    def results(selected, reference, rows, recordings, track, car):
+    def results(selected, reference, extra_choices, rows, recordings, track, car):
         if not rows or not selected or not reference:
             return html.P("Pick one of your laps and something to compare it against.",
                           className="note")
         row = rows[selected[0]]
         lap = load_lap(row["path"], row["lap"])
         lap_label = f"Your lap {row['lap']} ({row['time']})"
+        extras, problems = [], []
+        for choice in (extra_choices or [])[:MAX_EXTRAS]:
+            if choice == reference:
+                continue
+            try:
+                p, name = load_choice(choice, recordings, track, car)
+            except ServerError as exc:
+                problems.append(f"Couldn't get a lap to show alongside from the server: {exc}")
+                continue
+            if not _same_lap(p, lap):
+                extras.append((name, p))
 
         if reference == SELF_SECTIONS:
             mine = _my_laps(recordings, track, car)[:MAX_SECTION_LAPS]
@@ -443,36 +500,26 @@ def create_app(
                      f"best: {_fmt_time(analysis.theoretical_best_s)}. Traces show your best lap.")
             return _results_view(analysis, row["id"], best_id, lap_label,
                                  f"Your best lap ({_fmt_time(analysis.lap_times[best_id])})",
-                                 intro)
+                                 intro, " ".join(problems), extras)
 
-        if reference == SELF_BEST:
-            best = _my_laps(recordings, track, car)[0]
-            ref = load_lap(best["path"], best["lap"])
-            ref_label = f"Your best lap {best['lap']} ({best['time']})"
-        elif reference.startswith("srv:"):
-            try:
-                path = server().download_lap(reference.removeprefix("srv:"), cache_dir)
-            except (ServerError, AttributeError) as exc:
-                return html.P(f"Couldn't get that lap from the server: {exc}", className="note")
-            ref = load_reference(path)
-            ref_label = f"{ref.facts.driver or 'Online'} ({_fmt_time(ref.facts.lap_time_s)})"
-        else:
-            path = reference.removeprefix("ref:")
-            ref = load_reference(path)
-            ref_label = f"{ref.facts.driver or 'Expert'} ({_fmt_time(ref.facts.lap_time_s)})"
+        try:
+            ref, ref_label = load_choice(reference, recordings, track, car)
+        except ServerError as exc:
+            return html.P(f"Couldn't get that lap from the server: {exc}", className="note")
+        extras = [(n, p) for n, p in extras if not _same_lap(p, ref)]
         if _same_lap(lap, ref):
             return html.P("This lap is the reference itself. Pick another of your laps, or "
                           "compare against your fastest time in each section.", className="note")
         analysis = analyse({"you": lap, "ref": ref}, reference="ref")
-        warning = ""
         ref_car, lap_car = (f.car_model or f.car for f in (ref.facts, lap.facts))
         if ref_car != lap_car:
             same_class = f" (both {lap.facts.car_class})" if lap.facts.car_class else ""
-            warning = (f"Different car: the reference is the {ref_car}, yours is the "
-                       f"{lap_car}{same_class}. Part of the gap may be the car, not "
-                       "the driving.")
+            problems.insert(0, f"Different car: the reference is the {ref_car}, yours is the "
+                               f"{lap_car}{same_class}. Part of the gap may be the car, not "
+                               "the driving.")
         intro = f"Compared with {ref_label}, section by section."
-        return _results_view(analysis, "you", "ref", lap_label, ref_label, intro, warning)
+        return _results_view(analysis, "you", "ref", lap_label, ref_label, intro,
+                             " ".join(problems), extras)
 
     # --- Online leaderboard ----------------------------------------------------
 
@@ -656,7 +703,9 @@ def create_app(
         # New laps start ticked; ones you unticked stay unticked.
         keep = [k for k in labels if k in (picked or []) or k not in listed]
         listed.update(labels)
-        return (html.B("Your laps that would make the leaderboard:"), {},
+        return (html.Div([html.B("Your laps that would make the leaderboard:"),
+                          html.Span(" uploaded laps are shared with their telemetry and car "
+                                    "setup.", className="muted")]), {},
                 [{"label": f" {label}", "value": key} for key, label in labels.items()],
                 keep, status, new_version)
 
@@ -712,9 +761,12 @@ def create_app(
 
 
 def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
-                  ref_label: str, intro: str, warning: str = "") -> html.Div:
+                  ref_label: str, intro: str, warning: str = "",
+                  extras: list[tuple[str, ProcessedLap]] = ()) -> html.Div:
+    """``extras``: more laps to show alongside (not analysed), by name."""
     lap, ref = a.laps[lap_id], a.laps[ref_id]
     lap_t, ref_t = a.lap_times[lap_id], a.lap_times[ref_id]
+    extras = [(name, on_grid(p, ref.distance_m)) for name, p in extras]
     findings = a.findings(lap_id)
     gains = [
         (seg, a.stats[a.best_segment_lap[i]][i].time_s - a.stats[lap_id][i].time_s)
@@ -730,18 +782,23 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
     if findings:
         f = findings[0]
         cards.append(("Biggest loss", f.segment.name, f"{f.time_lost_s:.3f} s"))
+    for name, p in extras:
+        t = float(p.time_s[-1])
+        cards.append(("Also shown", _fmt_time(t), name, f"{t - ref_t:+.3f} s to the reference"))
 
-    geometry = track_geometry(ref, list(a.laps.values()))
+    geometry = track_geometry(ref, [*a.laps.values(), *(p for _, p in extras)])
     # No Plotly toolbar: zoom by dragging (traces) or scrolling (map), move by
     # dragging the map, reset by double-clicking or with "Reset zoom".
     graph_config = {"displayModeBar": False, "doubleClick": "reset"}
     viz = [html.Div(className="viz-traces", children=dcc.Graph(
-        id="traces", figure=traces_figure(lap, ref, a.segments, lap_label, ref_label, geometry),
+        id="traces",
+        figure=traces_figure(lap, ref, a.segments, lap_label, ref_label, geometry, extras),
         config=graph_config,
     ))]
     if geometry is not None:
         viz.append(html.Div(className="viz-map", children=dcc.Graph(
-            id="map", figure=map_figure(geometry, lap, ref, a.segments, lap_label, ref_label),
+            id="map",
+            figure=map_figure(geometry, lap, ref, a.segments, lap_label, ref_label, extras),
             config={**graph_config, "scrollZoom": True},
         )))
 
@@ -779,7 +836,8 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
             + ", ".join(f"{s.name} ({g:.2f} s)" for s, g in gains[:6]) + ".",
             className="gains",
         ))
-    children += [html.H2("Sections"), _sections_table(a, lap_id)]
+    children += [html.H2("Sections"), _sections_table(a, lap_id, extras)]
+    children += _setup_view([("You", lap), (ref_label, ref), *extras])
     return html.Div(children)
 
 
@@ -798,7 +856,8 @@ def _finding_view(f: Finding, index: int) -> html.Div:
     )
 
 
-def _sections_table(a: SessionAnalysis, lap_id: str) -> dash_table.DataTable:
+def _sections_table(a: SessionAnalysis, lap_id: str,
+                    extras: list[tuple[str, ProcessedLap]] = ()) -> dash_table.DataTable:
     rows = []
     for i, seg in enumerate(a.segments):
         mine = a.stats[lap_id][i].time_s
@@ -808,12 +867,15 @@ def _sections_table(a: SessionAnalysis, lap_id: str) -> dash_table.DataTable:
             "metres": f"{seg.start_m:.0f}–{seg.end_m:.0f}",
             "you": f"{mine:.3f}", "ref": f"{ref:.3f}",
             "delta": round(mine - ref, 3),
+            **{f"extra{k}": f"{segment_stats(p, seg).time_s:.3f}"
+               for k, (_, p) in enumerate(extras)},
         })
     return dash_table.DataTable(
         data=rows,
         columns=[{"name": "Section", "id": "section"}, {"name": "Metres", "id": "metres"},
                  {"name": "You", "id": "you"}, {"name": "Reference", "id": "ref"},
-                 {"name": "Δ (s)", "id": "delta", "type": "numeric"}],
+                 {"name": "Δ (s)", "id": "delta", "type": "numeric"},
+                 *({"name": name, "id": f"extra{k}"} for k, (name, _) in enumerate(extras))],
         style_as_list_view=True,
         style_cell={"fontFamily": FONT, "fontSize": 14, "padding": "5px 10px"},
         style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
@@ -823,6 +885,54 @@ def _sections_table(a: SessionAnalysis, lap_id: str) -> dash_table.DataTable:
             {"if": {"filter_query": "{delta} < -0.05", "column_id": "delta"},
              "backgroundColor": "#e3f5ee", "color": "#0b6b4a"},
         ],
+    )
+
+
+def _setup_view(laps: list[tuple[str, ProcessedLap]]) -> list:
+    """Your car setup next to the other laps': the settings that differ, and all
+    of them folded away. Laps uploaded before setups were shared have none."""
+    children = [html.H2("Setup")]
+    have = [(name, p) for name, p in laps if p.setup]
+    missing = [name for name, p in laps if not p.setup]
+    if missing:
+        children.append(html.P(
+            f"No setup recorded for {', '.join(missing)}: laps uploaded before setups "
+            "were shared don't have one.", className="muted"))
+    if not have:
+        return children
+    rows = compare([p.setup for _, p in have])
+    names = [name for name, _ in have]
+    if len(have) > 1:
+        differ = [r for r in rows if r.differs]
+        fixed = all(p.facts.setup_fixed for _, p in have)
+        note = ("All of these laps were in fixed-setup sessions, so only the driver's "
+                "settings (aids, brake balance, fuel and the like) could differ. "
+                if fixed else "")
+        if differ:
+            children.append(html.P(note + f"{len(differ)} of {len(rows)} settings differ:",
+                                   className="muted"))
+            children.append(_setup_table(differ, names))
+        else:
+            children.append(html.P(note + "The setups are the same.", className="muted"))
+    children.append(html.Details(className="mt", children=[
+        html.Summary(f"All settings ({len(rows)})"),
+        _setup_table(rows, names),
+    ]))
+    return children
+
+
+def _setup_table(rows: list[SetupRow], names: list[str]) -> dash_table.DataTable:
+    return dash_table.DataTable(
+        data=[{"group": r.group, "name": r.name, "differs": int(r.differs),
+               **{f"v{k}": v or "–" for k, v in enumerate(r.values)}} for r in rows],
+        columns=[{"name": "Area", "id": "group"}, {"name": "Setting", "id": "name"},
+                 *({"name": n, "id": f"v{k}"} for k, n in enumerate(names))],
+        style_as_list_view=True,
+        style_cell={"fontFamily": FONT, "fontSize": 14, "padding": "5px 10px",
+                    "textAlign": "left"},
+        style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
+        style_data_conditional=[{"if": {"filter_query": "{differs} = 1"},
+                                 "backgroundColor": "#fff8e6"}],
     )
 
 
@@ -963,13 +1073,14 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (functi
   }
 
   return {
-    // Hovering the traces shows where both cars are on the map.
+    // Hovering the traces shows where the cars are on the map.
     onHover(hover) {
       const gd = plot('map');
-      if (!gd || !hover || !hover.points || !hover.points.length) return none();
+      if (!gd || !gd._fullData || !hover || !hover.points || !hover.points.length) return none();
       const d = hover.points[0].x, update = {x: [], y: []}, idx = [];
-      for (const [line, pos] of [['ref-line', 'ref-pos'], ['lap-line', 'lap-pos']]) {
-        const li = find(gd, line), pi = find(gd, pos);
+      const lines = gd._fullData.map(t => t.meta).filter(m => /-line$/.test(m || ''));
+      for (const line of lines) {
+        const li = find(gd, line), pi = find(gd, line.replace(/-line$/, '-pos'));
         if (li < 0 || pi < 0) continue;
         const t = gd._fullData[li], k = at(t.x, d);
         update.x.push([t.x[k]]); update.y.push([t.y[k]]); idx.push(pi);
@@ -1075,6 +1186,8 @@ _INDEX = """<!DOCTYPE html>
   .viz-help { justify-content: space-between; }
   .grow-text { flex: 1; }
   .candidate-pick label { display: block; padding: 2px 0; cursor: pointer; }
+  .extras-label { display: block; margin: 12px 0 4px; }
+  .extras-pick .dash-dropdown-actions { display: none; }
   .board-filters > summary { cursor: pointer; user-select: none; }
   .board-filters[open] > summary { margin-bottom: 8px; }
   .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; }

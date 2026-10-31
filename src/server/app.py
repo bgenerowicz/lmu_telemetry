@@ -18,7 +18,6 @@ import gzip
 import hashlib
 import html
 import json
-import shutil
 import sqlite3
 import statistics
 import tempfile
@@ -33,6 +32,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Upl
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from lmu_core.bands import BAND_FIELDS, FUEL_LABELS, describe, track_temp_band
+from lmu_core.carmodel import setup_values
 from lmu_core.laps import lap_facts, split_laps
 from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap
@@ -61,6 +61,8 @@ def create_app(
         _fill_added_columns(settings)
     if db.upgrade(settings.data_dir, 1):
         _hide_driver_names(settings)
+    if db.upgrade(settings.data_dir, 2):
+        _add_setups(settings)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
     if unstored:
@@ -286,8 +288,8 @@ def create_app(
             "<p>When you sign in with Steam we store your Steam ID and Steam display name. "
             "When you upload a lap we store the lap's telemetry (one lap cut from your LMU "
             "recording, including the in-game driver name and car setup) and show your "
-            "display name, lap time and the lap's telemetry on the leaderboard; the in-game "
-            "driver name is not shown. Laps that drop out of the top "
+            "display name, lap time, the lap's telemetry and its car setup on the "
+            "leaderboard; the in-game driver name is not shown. Laps that drop out of the top "
             "are deleted.</p><p>You can delete your account and all your laps at any time "
             "from the app.</p>"))
 
@@ -465,14 +467,38 @@ def _hide_driver_names(settings: Settings) -> None:
         con.close()
 
 
+def _add_setups(settings: Settings) -> None:
+    """Processed laps stored before setups were kept get theirs, from the extract."""
+    con = db.connect(settings.data_dir)
+    try:
+        for (lap_id,) in con.execute("SELECT id FROM laps").fetchall():
+            raw, processed = db.lap_files(settings.data_dir, lap_id)
+            try:
+                setup = _from_extract(raw, int(settings.max_unpacked_mb * 1e6),
+                                      lambda rec: setup_values(rec.metadata.get("CarSetup")))
+                p = ProcessedLap.load(processed)
+            except Exception:  # noqa: BLE001 - a lap that can't be read keeps no setup
+                continue
+            dataclasses.replace(p, setup=setup).save(processed)
+    finally:
+        con.close()
+
+
 def _facts_from_extract(path: Path, limit: int):
+    def facts(rec: Recording):
+        number = int(rec.metadata["ExtractedLap"])
+        lap = next(l for l in split_laps(rec) if l.number == number)
+        return lap_facts(rec, lap)
+
+    return _from_extract(path, limit, facts)
+
+
+def _from_extract(path: Path, limit: int, read: Callable[[Recording], object]):
     with tempfile.TemporaryDirectory() as tmp:
         unpacked = Path(tmp) / "lap.duckdb"
         _gunzip(path.read_bytes(), unpacked, limit)
         with Recording(unpacked) as rec:
-            number = int(rec.metadata["ExtractedLap"])
-            lap = next(l for l in split_laps(rec) if l.number == number)
-            return lap_facts(rec, lap)
+            return read(rec)
 
 
 def _rule_reason(result, track_limits: str) -> str:

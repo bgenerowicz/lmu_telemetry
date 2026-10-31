@@ -28,7 +28,8 @@ server, reading the same processed lap format.
    an official time, and didn't start in the pits.
 3. **Resample by distance** (`resample.py`) onto a 1 m grid of `Lap Dist`,
    giving the *processed lap*: one value per metre for time, speed, inputs,
-   gear, rpm, g-forces and x/y, plus the `LapFacts`, saved as a compressed
+   gear, rpm, g-forces and x/y, plus the `LapFacts` and the car's setup (each
+   setting as the game shows it, from `CarSetup`), saved as a compressed
    NumPy archive (`.lap.npz`, ~350 KB). This is what gets shared as a
    reference lap and, later, uploaded. Resampled lap times match the official
    ones to within 0.01 s.
@@ -41,7 +42,9 @@ server, reading the same processed lap format.
 5. **Compare** (`compare.py`, `analysis.py`): `Δt(d) = t_lap(d) − t_ref(d)`.
    The reference is either one lap (an expert lap, whose corners then define
    the segments) or, per segment, the driver's own fastest lap through it;
-   adding those up gives the theoretical best lap.
+   adding those up gives the theoretical best lap. Up to two more laps can be
+   shown alongside (traces, map, section times); only the reference is
+   analysed.
 6. **Advise** (`analysis.py`) from per-segment metrics: braking point and
    peak pressure, entry, minimum and exit speed, full-throttle point, metres
    off throttle. Losses on a straight that come from a slower start are blamed
@@ -53,6 +56,10 @@ centre line derived once from the reference lap's GPS position. This is
 smoother than GPS (quantised to ~0.4 m) and identical across recordings; it
 matches each lap's own GPS to ~0.1 m. Track edges come from `Track Edge`
 (edge on the side the car is on), combined over the laps being compared.
+
+`setups.py` compares setups: settings in plain words, grouped by area, with
+the four wheels joined where they're the same; the app shows the ones that
+differ from yours.
 
 `library.py` finds laps: it scans a telemetry folder (metadata and lap events
 only, cached per file) and loads reference laps from `.lap.npz` folders: the
@@ -97,7 +104,8 @@ The server (`src/server`): FastAPI + SQLite.
   driver keeps one lap (their best) per car there; laps pushed out are deleted. Duplicates are found by lap content (recording
   time, lap, time, track, car), not file bytes.
 - Stored per lap: the extract (for audits) and the processed `.lap.npz`
-  (served at `/api/laps/{id}/lap.npz` for the app to compare against). The
+  (served at `/api/laps/{id}/lap.npz` for the app to compare against, with
+  the lap's setup). The
   in-game driver name (often a real name) is never served: the API and the
   served lap show the Steam name.
 - `server.admin` for moderation; `DELETE /api/me` deletes an account and its

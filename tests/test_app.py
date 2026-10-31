@@ -60,10 +60,42 @@ def test_results_against_expert_lap(tmp_path):
 
     app = webapp.create_app([REFERENCES], tmp_path / "refs")
     results = app.callback_map["results.children"]["callback"]
-    view = results.__wrapped__([lap2], f"ref:{ref.path}", rows, recordings, info.track, info.car)
+    view = results.__wrapped__([lap2], f"ref:{ref.path}", [], rows, recordings, info.track,
+                               info.car)
     text = str(view)
     assert "Where you lose time" in text
     assert "+0.816 s" in text
+    # The same recording: the same setup.
+    assert "The setups are the same." in text
+
+    # Lap 1 shown alongside: on the traces and map, in the cards and sections.
+    view = results.__wrapped__([lap2], f"ref:{ref.path}", [f"mine:{info.path}|1"], rows,
+                               recordings, info.track, info.car)
+    text = str(view)
+    assert "Also shown" in text and "Your lap 1 (" in text
+    [viz] = [c for c in view.children if getattr(c, "id", None) == "viz"]
+    names = {t.name for t in viz.children[0].children.figure.data}
+    assert {"Your lap 2 (" + rows[lap2]["time"] + ")", "Your lap 1 (1:54.425)"} <= names
+
+
+def test_traces_include_rpm():
+    from lmu_core.analysis import analyse
+    from webapp.charts import ROWS, traces_figure
+
+    info = scan_folder(SAMPLES)[0][0]
+    a = analyse({"you": load_lap(info.path, 2), "ref": load_lap(info.path, 3)}, reference="ref")
+    fig = traces_figure(a.laps["you"], a.laps["ref"], a.segments, "you", "ref")
+    titles = [t.text for t in fig.layout.annotations if t.text in {r[0] for r in ROWS}]
+    assert "RPM" in titles and titles.index("RPM") == titles.index("Gear") - 1
+
+
+def test_saved_laps_keep_their_setup(tmp_path):
+    info = scan_folder(SAMPLES)[0][0]
+    lap = load_lap(info.path, info.best_lap.number)
+    assert lap.setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    path = save_reference(lap, tmp_path)
+    from lmu_core.library import load_reference
+    assert load_reference(path).setup == lap.setup
 
 
 def test_conditions_in_one_line():

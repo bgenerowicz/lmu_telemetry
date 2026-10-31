@@ -297,6 +297,24 @@ def test_fuel_filter_takes_known_bands_only(tmp_path):
     assert client.get("/api/leaderboard", params={**params, "fuel": ["x"] * 5000}).status_code == 422
 
 
+def test_served_laps_carry_the_setup(tmp_path, extracts):
+    import dataclasses
+    import sqlite3
+
+    client, settings = make_client(tmp_path)
+    lap = upload(client, sign_in(client, "Alice"), extracts[3]).json()["lap_id"]
+    npz = settings.data_dir / "laps" / f"{lap}.lap.npz"
+    assert ProcessedLap.load(npz).setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+
+    # Laps stored before setups were kept get theirs from the extract, once.
+    dataclasses.replace(ProcessedLap.load(npz), setup=None).save(npz)
+    con = sqlite3.connect(settings.data_dir / "lmu.sqlite3")
+    con.execute("PRAGMA user_version = 1")
+    con.close()
+    make_client(tmp_path)
+    assert ProcessedLap.load(npz).setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+
+
 def test_upload_limits(tmp_path, extracts):
     client, _ = make_client(tmp_path, max_unpacked_mb=1)
     alice = sign_in(client, "Alice")

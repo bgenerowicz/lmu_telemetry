@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from lmu_core.carmodel import car_model, fingerprint, setup_is_fixed
+from lmu_core.carmodel import car_model, fingerprint, setup_is_fixed, setup_values
 
 ALGARVE = Path(__file__).parent.parent / "samples" / (
     "Algarve International Circuit_P_2026-10-30T12_56_57Z.duckdb"
@@ -38,3 +38,13 @@ def test_fixed_setup_when_only_driver_settings_are_free():
     assert setup_is_fixed(setup(3)) is True
     assert setup_is_fixed(setup(9)) is False
     assert setup_is_fixed(None) is None
+
+
+@pytest.mark.skipif(not ALGARVE.exists(), reason="sample recording not present")
+def test_setup_values_as_the_game_shows_them():
+    meta = dict(duckdb.connect(str(ALGARVE), read_only=True)
+                .execute("SELECT * FROM metadata").fetchall())
+    values = setup_values(meta["CarSetup"])
+    assert values["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    assert values["WM_CAMBER-W_FL"] == "-2.20 deg"
+    assert setup_values(None) is None and setup_values("{}") is None

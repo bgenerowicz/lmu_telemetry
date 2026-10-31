@@ -14,6 +14,9 @@ from lmu_core.extract import extract_lap
 TIMEOUT = httpx.Timeout(10.0, read=60.0)
 # Leaderboards change rarely; don't refetch on every click.
 CACHE_SECONDS = 60
+# Downloaded laps, cached by lap id. A new suffix when served laps gain data, so
+# cached copies without it are downloaded again (v2: car setups).
+CACHE_SUFFIX = ".v2.lap.npz"
 
 
 class ServerError(Exception):
@@ -86,7 +89,7 @@ class ServerClient:
 
     def download_lap(self, lap_id: str, cache_dir: Path) -> Path:
         """The processed lap, from the local cache or the server."""
-        path = Path(cache_dir) / f"{lap_id}.lap.npz"
+        path = Path(cache_dir) / f"{lap_id}{CACHE_SUFFIX}"
         if path.exists():
             return path
         try:

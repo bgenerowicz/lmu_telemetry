@@ -6,8 +6,8 @@ Laps are compared by position on track, so every channel is resampled against
 is interpolated from it, and every other channel is then read at those times.
 
 The result, a :class:`ProcessedLap`, is what gets stored and shared: one value
-per metre for each channel, plus the lap's :class:`LapFacts`, saved together
-as a compressed NumPy archive (``.lap.npz``).
+per metre for each channel, plus the lap's :class:`LapFacts` and the car's
+setup, saved together as a compressed NumPy archive (``.lap.npz``).
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
+from lmu_core.carmodel import setup_values
 from lmu_core.lapfacts import LapFacts
 from lmu_core.laps import Lap, lap_facts
 from lmu_core.recording import Recording
@@ -46,6 +47,9 @@ _EARTH_M_PER_DEG = 111_320.0
 class ProcessedLap:
     facts: LapFacts
     data: dict[str, np.ndarray]
+    # The car's settings as the game shows them (lmu_core.carmodel.setup_values);
+    # None for laps saved before setups were kept.
+    setup: dict[str, str] | None = None
 
     @property
     def distance_m(self) -> np.ndarray:
@@ -56,16 +60,19 @@ class ProcessedLap:
         return self.data["time_s"]
 
     def save(self, path: str | Path) -> None:
-        """Save as a compressed NumPy archive (``.npz``), facts included as JSON."""
-        facts = json.dumps(dataclasses.asdict(self.facts))
+        """Save as a compressed NumPy archive (``.npz``), facts and setup included as JSON."""
+        extra = {"_facts": np.array(json.dumps(dataclasses.asdict(self.facts)))}
+        if self.setup:
+            extra["_setup"] = np.array(json.dumps(self.setup))
         with open(path, "wb") as f:
-            np.savez_compressed(f, _facts=np.array(facts), **self.data)
+            np.savez_compressed(f, **extra, **self.data)
 
     @classmethod
     def load(cls, path: str | Path) -> ProcessedLap:
         with np.load(path, allow_pickle=False) as z:
             facts = LapFacts(**json.loads(str(z["_facts"])))
-            return cls(facts, {k: z[k] for k in z.files if k != "_facts"})
+            setup = json.loads(str(z["_setup"])) if "_setup" in z.files else None
+            return cls(facts, {k: z[k] for k in z.files if not k.startswith("_")}, setup)
 
 
 def track_length(rec: Recording) -> float:
@@ -115,7 +122,7 @@ def resample_lap(rec: Recording, lap: Lap, step_m: float = 1.0) -> ProcessedLap:
         data["x_m"] = np.interp(t_grid, ts, x)
         data["y_m"] = np.interp(t_grid, ts, y)
 
-    return ProcessedLap(lap_facts(rec, lap), data)
+    return ProcessedLap(lap_facts(rec, lap), data, setup_values(rec.metadata.get("CarSetup")))
 
 
 def _unwrapped_lap_dist(rec: Recording, lap: Lap, length: float) -> tuple[np.ndarray, np.ndarray]:
