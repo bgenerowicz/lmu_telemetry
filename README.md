@@ -10,14 +10,21 @@ where you lose time and why, with traces and a track map.
 
 ## LMU Lap Analyser (Windows)
 
-1. Download [`lmu-analyser.exe`](https://github.com/bgenerowicz/lmu_telemetry/releases/latest/download/lmu-analyser.exe)
-   from the [latest release](https://github.com/bgenerowicz/lmu_telemetry/releases/latest).
-   Every push to the default branch rebuilds it.
-2. In LMU, turn on telemetry recording (Settings → Gameplay) and drive a
+1. In LMU, turn on telemetry recording (Settings → Gameplay) and drive a
    session with a few timed laps.
-3. Run `lmu-analyser.exe`. A console window opens (keep it open; close it to
-   quit) and the app opens in your browser.
-4. In the app:
+2. Start the app, either way:
+   - **The exe:** download [`lmu-analyser.exe`](https://github.com/bgenerowicz/lmu_telemetry/releases/latest/download/lmu-analyser.exe)
+     from the [latest release](https://github.com/bgenerowicz/lmu_telemetry/releases/latest)
+     and run it. It is built from this repository by
+     [GitHub Actions](.github/workflows/build-windows.yml) on every push, but
+     it isn't signed, so Windows warns about an unknown publisher: choose
+     "More info" → "Run anyway".
+   - **From source**, if you'd rather not run an unsigned exe: see
+     [Running from source](#running-from-source).
+
+   The app opens in your browser. Keep its console window (or terminal) open;
+   closing it quits the app.
+3. In the app:
    1. **Track and car**: from your recordings and the online leaderboard.
    2. **Telemetry folder**: found through Steam if possible; otherwise
       **Browse…** to LMU's `UserData\Telemetry`. It's remembered.
@@ -50,14 +57,35 @@ a warning.
 Expert laps (`.lap.npz`) in `Documents\LMU Lap Analyser\references` or in
 [`references/`](references/) (shipped with the app) are picked up too.
 
-Windows may warn about an unknown publisher, since the exe isn't signed:
-choose "More info" → "Run anyway".
+### Running from source
 
-From source, on any OS:
+This runs the code in this repository as it is, with nothing prebuilt.
 
-```bash
-python -m desktop
-```
+1. Install [Python](https://www.python.org/downloads/) 3.11 or newer (on
+   Windows, tick "Add python.exe to PATH" in the installer).
+2. Get the code: **Code → Download ZIP** on GitHub and unzip it, or
+   `git clone https://github.com/bgenerowicz/lmu_telemetry.git`.
+3. Open a terminal in that folder (in Explorer: right-click the folder →
+   "Open in Terminal") and install the app into its own environment, once:
+
+   ```powershell
+   python -m venv .venv
+   ```
+
+   ```powershell
+   .venv\Scripts\pip install -e ".[webapp]"
+   ```
+
+4. Start it (this is also how you start it next time):
+
+   ```powershell
+   .venv\Scripts\python -m desktop
+   ```
+
+To update, download the code again (or `git pull`) and repeat step 3.
+
+On Linux or macOS (for recordings copied from a Windows PC), use
+`.venv/bin/pip` and `.venv/bin/python` instead.
 
 ## Leaderboard server
 
