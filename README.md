@@ -8,7 +8,7 @@ laps and a lap to compare against (from the online leaderboard, or your own),
 and it shows where you lose time and why, with traces and a track map.
 Status: early, but usable.
 
-![Comparing a lap with the leaderboard's fastest: time gap, speed, pedals, steering, line and gear by distance, next to a track map coloured by where time is lost](docs/images/comparison.png)
+![Comparing a lap with the leaderboard's fastest: time gap, speed, pedals, steering, line, RPM and gear by distance, next to a track map with the start/finish line and sectors, coloured by where time is lost, with both cars on it](docs/images/comparison.png)
 
 ## Getting started (Windows)
 
@@ -40,7 +40,8 @@ Status: early, but usable.
 The comparison shows traces (time gap, speed, pedals, steering, line, RPM, gear)
 next to a track map with both driving lines, the track edges, the start/finish
 line and the sectors. Hover the
-traces to see both cars on the map; drag across the traces, or click one of
+traces to see both cars on the map, each with an arrow to where its front
+wheels point; drag across the traces, or click one of
 the "where you lose time" sections, to zoom the map to that stretch. Scroll on
 the map to zoom, drag to move.
 
@@ -52,6 +53,8 @@ lost, with what to change in each:
 **Setup** lists the settings where the other laps' car setups differ from
 yours (wing, tyre pressures, springs, brake balance and so on), with every
 setting folded away below.
+
+![The settings where the reference lap's setup differs from yours, such as ABS map, brake balance and brake ducts](docs/images/setup.png)
 
 ### Online leaderboard
 
