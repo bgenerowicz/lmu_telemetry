@@ -3,7 +3,7 @@
 Setups come from :func:`lmu_core.carmodel.setup_values`: each setting the car
 has, by its game key, with its step on the setting's scale and the text the
 game shows. The text depends on the driver's units ("136 kPa", "19.7 psi"), so
-setups of the same car model are compared by step. Car-wide settings are ``VM_*``
+on the same car model a setting differs only if its step does too. Car-wide settings are ``VM_*``
 (``VM_REAR_WING``); per-wheel ones are ``WM_<name>-W_<corner>``
 (``WM_CAMBER-W_FL``). Rows here name them in plain words, grouped by area, and
 join the four wheels into one row (or front and rear) where they're the same.
@@ -79,7 +79,7 @@ class SetupRow:
 def compare(setups: list[dict[str, dict] | None], same_model: bool = True) -> list[SetupRow]:
     """The settings of several setups side by side, grouped by area. Settings
     none of them has or can change (N/A, fixed) are left out. Settings differ
-    by step on the same car model (whatever the units), else by text."""
+    by text, and on the same car model by step as well (so not by units)."""
     keys = list(dict.fromkeys(k for s in setups if s for k in s if not k.startswith(_SKIP)))
     car_wide = [k for k in keys if not _is_wheel(k)]
     wheels = list(dict.fromkeys(_wheel_name(k) for k in keys if _is_wheel(k)))
@@ -100,8 +100,12 @@ def compare(setups: list[dict[str, dict] | None], same_model: bool = True) -> li
         if not any(t not in _UNSET for t in texts if t is not None):
             continue
         present = [(step, text) for step, text in each if text is not None]
-        by_step = same_model and all(step is not None for step, _ in present)
-        differs = len({step if by_step else text for step, text in present}) > 1
+        differs = len({text for _, text in present}) > 1
+        if same_model and all(step is not None for step, _ in present):
+            # Other units show the same step differently; and a compound's step
+            # can differ between sessions (which compounds are available) for
+            # the same tyre. Only both differing is a different setting.
+            differs = differs and len({step for step, _ in present}) > 1
         rows.append(SetupRow(group, name, texts, differs))
     order = [g for g, _ in _GROUPS] + ["Other"]
     return sorted(rows, key=lambda r: order.index(r.group))

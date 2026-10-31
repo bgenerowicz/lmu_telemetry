@@ -42,11 +42,15 @@ def test_a_lap_without_a_setup_is_left_out_of_the_differences():
 
 def test_same_model_compares_steps_whatever_the_units():
     mine = {"WM_PRESSURE-W_FL": {"value": 0, "text": "136 kPa"},
-            "VM_REAR_WING": {"value": 23, "text": "8.8 deg"}}
+            "VM_REAR_WING": {"value": 23, "text": "8.8 deg"},
+            "VM_FRONT_TIRE_COMPOUND": {"value": 1, "text": "Medium"}}
     theirs = {"WM_PRESSURE-W_FL": {"value": 0, "text": "19.7 psi"},
-              "VM_REAR_WING": {"value": 20, "text": "8.2 deg"}}
+              "VM_REAR_WING": {"value": 20, "text": "8.2 deg"},
+              "VM_FRONT_TIRE_COMPOUND": {"value": 0, "text": "Medium"}}
     rows = {r.name: r for r in compare([mine, theirs])}
     assert not rows["Tyre pressure front left"].differs
+    # The same tyre can have another step in another session.
+    assert not rows["Front tyre compound"].differs
     assert rows["Tyre pressure front left"].values == ("136 kPa", "19.7 psi")
     assert rows["Rear wing"].differs
     # Other models' steps mean other things: by text.
