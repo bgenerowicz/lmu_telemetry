@@ -1,6 +1,6 @@
 """Comparing car setups setting by setting."""
 
-from lmu_core.setups import compare
+from lmu_core.setups import compare, wheel_lock_deg
 
 
 def wheels(name, fl, fr, rl, rr):
@@ -56,3 +56,10 @@ def test_same_model_compares_steps_whatever_the_units():
     # Other models' steps mean other things: by text.
     rows = {r.name: r for r in compare([mine, theirs], same_model=False)}
     assert rows["Tyre pressure front left"].differs
+
+
+def test_wheel_lock_from_the_steering_lock_setting():
+    assert wheel_lock_deg({"VM_STEER_LOCK": {"value": 6, "text": "524deg (18.5deg)"}}) == 18.5
+    assert wheel_lock_deg({"VM_STEER_LOCK": {"value": 6, "text": "536 (18) deg"}}) == 18
+    assert wheel_lock_deg({"VM_STEER_LOCK": {"value": 0, "text": "N/A"}}) is None
+    assert wheel_lock_deg(None) is None

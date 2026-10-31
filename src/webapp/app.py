@@ -762,7 +762,10 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         ]),
         html.Div(className="row mt viz-help", children=[
             html.Span("On the map, scroll to zoom and drag to move. Drag across the traces to "
-                      "zoom in; the map follows. Click a section below to jump to it.",
+                      "zoom in; the map follows. Click a section below to jump to it. Hover "
+                      "the traces to see both cars on the map, pointing where their front "
+                      "wheels point: more angle than the reference on the same line means "
+                      "the front is sliding.",
                       className="muted grow-text"),
             html.Button("Reset zoom", id="reset-zoom", className="btn"),
         ]),
@@ -1020,12 +1023,15 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (functi
     onHover(hover) {
       const gd = plot('map');
       if (!gd || !hover || !hover.points || !hover.points.length) return none();
-      const d = hover.points[0].x, update = {x: [], y: []}, idx = [];
+      const d = hover.points[0].x, update = {x: [], y: [], 'marker.angle': []}, idx = [];
       for (const [line, pos] of [['ref-line', 'ref-pos'], ['lap-line', 'lap-pos']]) {
         const li = find(gd, line), pi = find(gd, pos);
         if (li < 0 || pi < 0) continue;
         const t = gd._fullData[li], k = at(t.x, d);
-        update.x.push([t.x[k]]); update.y.push([t.y[k]]); idx.push(pi);
+        // The front wheels' direction at this metre, for the arrow (charts.py).
+        const wheels = gd.data[pi].customdata;
+        update.x.push([t.x[k]]); update.y.push([t.y[k]]);
+        update['marker.angle'].push(wheels ? wheels[k] : 0); idx.push(pi);
       }
       if (idx.length) Plotly.restyle(gd, update, idx);
       return none();

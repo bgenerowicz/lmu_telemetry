@@ -11,6 +11,7 @@ join the four wheels into one row (or front and rear) where they're the same.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 # Not part of how the car drives: pit stop plans, and the tank size (shown with
@@ -49,6 +50,9 @@ _WORDS = {
     "SLOWBUMP": "slow bump", "SLOWREBOUND": "slow rebound", "TENDERSPRING": "tender spring",
     "TENDERSPRINGTRAVEL": "tender spring travel", "BRAKEMAP": "brake map", "DIFF": "diff",
 }
+# The steering lock setting shows the wheels' angle in brackets: "524deg (18.5deg)",
+# "536 (18) deg".
+_WHEEL_LOCK = re.compile(r"\(\s*(\d+(?:\.\d+)?)")
 _CORNERS = {"FL": "front left", "FR": "front right", "RL": "rear left", "RR": "rear right"}
 
 # Areas, in the order shown; a setting goes in the first whose words it has.
@@ -109,6 +113,15 @@ def compare(setups: list[dict[str, dict] | None], same_model: bool = True) -> li
         rows.append(SetupRow(group, name, texts, differs))
     order = [g for g, _ in _GROUPS] + ["Other"]
     return sorted(rows, key=lambda r: order.index(r.group))
+
+
+def wheel_lock_deg(setup: dict | None) -> float | None:
+    """The front wheels' angle at full steering lock (degrees), from the steering
+    lock setting; None if the setup or the setting isn't there."""
+    item = (setup or {}).get("VM_STEER_LOCK")
+    text = item.get("text") if isinstance(item, dict) else item
+    match = _WHEEL_LOCK.search(text or "")
+    return float(match.group(1)) if match else None
 
 
 def _settings(setups: list[dict | None], key: str) -> tuple[tuple[object, str | None], ...]:

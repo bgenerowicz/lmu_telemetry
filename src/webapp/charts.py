@@ -4,7 +4,8 @@ Two figures, linked in the browser (see ``_SYNC_JS`` in app.py):
 
 - traces against distance (time gap, speed, pedals, steering, line, rpm, gear);
 - a map with both driving lines, the start/finish line and sectors, which
-  pans and zooms on its own.
+  pans and zooms on its own. Hovering the traces puts both cars on it, as
+  arrows pointing where their front wheels point.
 
 Map traces carry a ``meta`` tag so the browser code can find them.
 """
@@ -18,6 +19,7 @@ from plotly.subplots import make_subplots
 from lmu_core.geometry import TrackGeometry, sector_starts
 from lmu_core.resample import ProcessedLap
 from lmu_core.segments import Segment
+from lmu_core.setups import wheel_lock_deg
 
 ROWS = [
     ("Δt to reference (s)", None),
@@ -96,6 +98,22 @@ def traces_figure(
     return fig
 
 
+def front_wheel_angles(lap: ProcessedLap, x: np.ndarray, y: np.ndarray) -> list[float] | None:
+    """Where the front wheels point at each metre, in degrees clockwise from up
+    on the map: the direction of travel turned by the steering (steering % of
+    full lock, times the wheels' angle at full lock). Without yaw in the
+    recordings the car's body is taken to point along its line, so this shows
+    steering against the line driven; more than another car on the same line
+    is the front sliding. None without a steering lock (no setup)."""
+    lock = wheel_lock_deg(lap.setup)
+    if lock is None or "steering_pct" not in lap.data:
+        return None
+    travel = np.degrees(np.arctan2(np.gradient(x), np.gradient(y)))
+    # Positive steering is to the right: clockwise.
+    wheels = travel + lap.data["steering_pct"] / 100 * lock
+    return np.round(wheels % 360, 1).tolist()
+
+
 def map_figure(
     geometry: TrackGeometry, lap: ProcessedLap, ref: ProcessedLap, segments: list[Segment],
     lap_name: str, ref_name: str,
@@ -137,10 +155,18 @@ def map_figure(
             x=x, y=y, mode="lines", name=name, meta=meta, line=dict(color=color, width=2),
             customdata=d, hovertemplate="%{customdata:.0f} m<extra>" + name + "</extra>",
         ))
-    for color, meta in ((REF_COLOR, "ref-pos"), (LAP_COLOR, "lap-pos")):
+    # Where each car is while hovering the traces (moved by _SYNC_JS in app.py):
+    # an arrow turned to where its front wheels point (angles per metre in
+    # customdata), or a dot for a lap without a setup to tell the steering lock.
+    for p, x, y, color, meta in ((ref, ref_x, ref_y, REF_COLOR, "ref-pos"),
+                                 (lap, lap_x, lap_y, LAP_COLOR, "lap-pos")):
+        angles = front_wheel_angles(p, x, y)
         fig.add_trace(go.Scatter(
             x=[], y=[], mode="markers", meta=meta, hoverinfo="skip", showlegend=False,
-            marker=dict(color=color, size=11, line=dict(color="white", width=2)),
+            customdata=angles,
+            marker=dict(color=color, size=11 if angles is None else 20,
+                        symbol="circle" if angles is None else "arrow",
+                        line=dict(color="white", width=2)),
         ))
 
     marks = [(0.0, "Start/finish", "solid")] + [

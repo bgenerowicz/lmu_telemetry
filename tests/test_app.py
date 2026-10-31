@@ -1,7 +1,9 @@
 """The library and the Dash app, against the samples."""
 
+import dataclasses
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from lmu_core.library import load_lap, load_references, save_reference, scan_folder
@@ -81,6 +83,24 @@ def test_traces_include_rpm():
     fig = traces_figure(a.laps["you"], a.laps["ref"], a.segments, "you", "ref")
     titles = [t.text for t in fig.layout.annotations if t.text in {r[0] for r in ROWS}]
     assert "RPM" in titles and titles.index("RPM") == titles.index("Gear") - 1
+
+
+def test_map_arrows_point_where_the_front_wheels_point():
+    from lmu_core.geometry import track_geometry
+    from webapp.charts import front_wheel_angles
+
+    info = scan_folder(SAMPLES)[0][0]
+    lap = load_lap(info.path, 3)
+    x, y = track_geometry(lap, [lap]).line(lap)
+    angles = np.array(front_wheel_angles(lap, x, y))
+    travel = np.degrees(np.arctan2(np.gradient(x), np.gradient(y))) % 360
+    # Turned from the direction of travel by the steering, at most the lock (18.5°).
+    turn = (angles - travel + 180) % 360 - 180
+    assert np.abs(turn).max() <= 18.5 * 0.65
+    steering = lap.data["steering_pct"]
+    assert np.all(np.sign(turn[np.abs(steering) > 5]) == np.sign(steering[np.abs(steering) > 5]))
+    no_setup = dataclasses.replace(lap, setup=None)
+    assert front_wheel_angles(no_setup, x, y) is None
 
 
 def test_saved_laps_keep_their_setup(tmp_path):
