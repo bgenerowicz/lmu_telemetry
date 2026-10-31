@@ -17,7 +17,7 @@ Rulesets live in [`rulesets/`](../rulesets/) as YAML. Example:
 | `description`     | Free text. |
 | `top_n`           | Laps kept per leaderboard (default 10), or per `top_n_per` group. |
 | `leaderboard_key` | Lap fields that must match for laps to compete (default `track, layout, car, game_version`). |
-| `top_n_per`       | Optional, e.g. `[car]`: keep `top_n` laps per car within each leaderboard (a class leaderboard with every car's best drivers). Each driver keeps one lap per group. |
+| `top_n_per`       | Optional, e.g. `[car]`: keep `top_n` laps per car within each leaderboard (a class leaderboard with every car's best drivers). Each driver keeps one lap per group. With band fields (`setup_fixed`, `track_temp_band`, `fuel_band`; `lmu_core.bands`) laps are kept per band, and the leaderboard shows each driver's best lap among the bands asked for. |
 | `on_unknown`      | `warn` (default) or `reject`: what to do when a recording lacks a field a rule needs. |
 | `rules`           | Map of lap field → rule. |
 

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from lmu_core.bands import fuel_band, track_temp_band
 from lmu_core.carmodel import car_model, setup_is_fixed
 from lmu_core.lapfacts import LapFacts
 from lmu_core.recording import Recording
@@ -75,6 +76,8 @@ def split_laps(rec: Recording) -> list[Lap]:
 
 def lap_facts(rec: Recording, lap: Lap) -> LapFacts:
     meta = rec.metadata
+    track_temp_c = _channel_at(rec, "Track Temperature", lap.start_ts)
+    fuel_l = _channel_at(rec, "Fuel Level", lap.start_ts)
     return LapFacts(
         track=meta.get("TrackName", ""),
         layout=meta.get("TrackLayout"),
@@ -85,14 +88,16 @@ def lap_facts(rec: Recording, lap: Lap) -> LapFacts:
         game_version=None,
         session_type=meta.get("SessionType"),
         weather=meta.get("WeatherConditions"),
-        track_temp_c=_channel_at(rec, "Track Temperature", lap.start_ts),
+        track_temp_c=track_temp_c,
         ambient_temp_c=_channel_at(rec, "Ambient Temperature", lap.start_ts),
         rain_pct=_channel_at(rec, "Rain", lap.start_ts),
         track_wetness_pct=_event_at(rec, "Minimum Path Wetness", lap.start_ts),
         # The setup JSON doesn't say whether it is the default setup.
         setup_is_default=None,
         setup_fixed=setup_is_fixed(meta.get("CarSetup")),
-        fuel_at_start_l=_channel_at(rec, "Fuel Level", lap.start_ts),
+        fuel_at_start_l=fuel_l,
+        track_temp_band=track_temp_band(track_temp_c),
+        fuel_band=fuel_band(fuel_l),
         # Only a compound index is recorded; its name depends on the car.
         tyre_compound=None,
         lap_time_s=lap.lap_time_s,

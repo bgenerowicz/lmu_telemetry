@@ -388,3 +388,47 @@ def test_leaderboards_group_liveries_of_a_model(tmp_path, extracts):
         "track": "Algarve International Circuit", "car_model": "McLaren 720S GT3"}).json()
     assert [(e["driver"], e["car"], e["car_model"]) for e in board] == [
         ("Bob", custom, "McLaren 720S GT3")]
+
+
+def hotter(extract: bytes, degrees: float) -> bytes:
+    """The same lap extract, on a hotter track."""
+    import tempfile
+
+    import duckdb
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "lap.duckdb"
+        path.write_bytes(gzip.decompress(extract))
+        con = duckdb.connect(str(path))
+        con.execute('UPDATE "Track Temperature" SET value = value + ?', [degrees])
+        con.close()
+        return gzip.compress(path.read_bytes())
+
+
+def test_laps_are_kept_and_filtered_per_band(tmp_path, extracts):
+    client, _ = make_client(tmp_path, ruleset="loose-v5.yaml")
+    alice, bob = sign_in(client, "Alice"), sign_in(client, "Bob")
+    track = "Algarve International Circuit"
+    # The sample: open setup, track ~21° (the 20-25° band), ~77 L fuel.
+    r = upload(client, alice, extracts[3]).json()
+    assert r["message"] == (f"Accepted: #1 on {track} in the McLaren 720S GT3 (open setup, "
+                            "track 20–25°, 60+ L fuel) (#1 overall in GT3).")
+    # A slower lap of Alice's on a hotter track is her best there, so it's kept too.
+    r = upload(client, alice, hotter(extracts[2], 10)).json()
+    assert r["accepted"] and "track 30–35°" in r["message"]
+    # (Another livery, or it would be the same lap as Alice's.)
+    bobs = as_car(hotter(extracts[3], 10), "McLaren Custom Team 2025 #397")
+    assert upload(client, bob, bobs).json()["rank"] == 1
+
+    def board(**filters):
+        laps = client.get("/api/leaderboard", params={"track": track, "car_class": "GT3",
+                                                      **filters}).json()
+        return [(e["driver"], round(e["lap_time_s"], 3)) for e in laps]
+
+    # Unfiltered, each driver's best lap; filtered, their best in those conditions.
+    assert sorted(board()) == [("Alice", 111.602), ("Bob", 111.602)]
+    assert board(track_temp_min=30, track_temp_max=40) == [("Bob", 111.602), ("Alice", 112.418)]
+    assert board(track_temp_max=25) == [("Alice", 111.602)]
+    assert board(setup="fixed") == [] and board(setup="open") != []
+    assert board(fuel=["0-10", "10-30"]) == [] and len(board(fuel=["60+"])) == 2
+    assert client.get("/api/leaderboards").json()[0]["laps"] == 2

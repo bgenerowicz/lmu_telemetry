@@ -90,7 +90,7 @@ The server (`src/server`): FastAPI + SQLite.
   only accepts tokens for sign-ins it started (a `state` value).
 - `POST /api/laps` takes an extract: size limits (upload and unpacked),
   rate limit, `verify_lap`, then the ruleset. Leaderboards are keyed by the
-  ruleset's `leaderboard_key` (`loose-v4`: track, layout, class); with
+  ruleset's `leaderboard_key` (`loose-v5`: track, layout, class); with
   `top_n_per: [car_model]` each car model (`lmu_core.carmodel`, from the setup) on a leaderboard keeps its own top N. Each
   driver keeps one lap (their best) per car there; laps pushed out are deleted. Duplicates are found by lap content (recording
   time, lap, time, track, car), not file bytes.

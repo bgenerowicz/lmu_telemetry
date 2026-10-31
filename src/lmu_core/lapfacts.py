@@ -33,6 +33,10 @@ class LapFacts:
     setup_is_default: bool | None = None
     # The session fixed the setup (lmu_core.carmodel.setup_is_fixed).
     setup_fixed: bool | None = None
+
+    # Bands of the above (lmu_core.bands), which laps are kept and filtered by.
+    track_temp_band: int | None = None
+    fuel_band: str | None = None
     fuel_at_start_l: float | None = None
     tyre_compound: str | None = None
 

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 
+from lmu_core.bands import TEMP_BAND_C
 from lmu_core.extract import extract_lap
 
 TIMEOUT = httpx.Timeout(10.0, read=60.0)
@@ -63,13 +64,16 @@ class ServerClient:
     def leaderboards(self) -> list[dict]:
         return _by_model(self._get("/api/leaderboards"))
 
-    def leaderboard(self, track: str, car: str) -> list[dict]:
-        """One car model's laps at a track, fastest first."""
-        return _by_model(self._get("/api/leaderboard", track=track, car_model=car))
+    def leaderboard(self, track: str, car: str, **filters) -> list[dict]:
+        """One car model's laps at a track, fastest first. ``filters``: the server's
+        (``setup``, ``track_temp_min``, ``track_temp_max``, ``fuel``)."""
+        return _by_model(self._get("/api/leaderboard", track=track, car_model=car,
+                                   **_present(filters)))
 
-    def class_leaderboard(self, track: str, car_class: str) -> list[dict]:
+    def class_leaderboard(self, track: str, car_class: str, **filters) -> list[dict]:
         """Every car of a class at a track, fastest first."""
-        return _by_model(self._get("/api/leaderboard", track=track, car_class=car_class))
+        return _by_model(self._get("/api/leaderboard", track=track, car_class=car_class,
+                                   **_present(filters)))
 
     def download_lap(self, lap_id: str, cache_dir: Path) -> Path:
         """The processed lap, from the local cache or the server."""
@@ -110,6 +114,23 @@ class ServerClient:
             raise ServerError(_detail(r))
         self.forget_cache()
         return body
+
+
+def band_filters(setup_fixed: bool | None, temp_band: int | None, fuel: str | None) -> dict:
+    """Filters for exactly one band (lmu_core.bands); unknown parts are left out."""
+    filters = {}
+    if setup_fixed is not None:
+        filters["setup"] = "fixed" if setup_fixed else "open"
+    if temp_band is not None:
+        filters.update(track_temp_min=temp_band, track_temp_max=temp_band + TEMP_BAND_C)
+    if fuel is not None:
+        filters["fuel"] = [fuel]
+    return filters
+
+
+def _present(filters: dict) -> dict:
+    """The filters that are set (an empty one means any)."""
+    return {k: v for k, v in filters.items() if v not in (None, [], ())}
 
 
 def _by_model(entries: list[dict]) -> list[dict]:

@@ -58,7 +58,8 @@ CONDITION_COLUMNS = {
     "track_temp_c": "REAL", "fuel_at_start_l": "REAL", "setup_fixed": "INTEGER",
 }
 # Columns added since the first version, filled from each lap's LapFacts.
-ADDED_COLUMNS = {**CONDITION_COLUMNS, "car_model": "TEXT"}
+ADDED_COLUMNS = {**CONDITION_COLUMNS, "car_model": "TEXT", "track_temp_band": "INTEGER",
+                 "fuel_band": "TEXT"}
 
 
 def connect(data_dir: Path) -> sqlite3.Connection:

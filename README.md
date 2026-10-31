@@ -38,11 +38,15 @@ Steam**. The app finds your laps that would make the leaderboard and uploads
 them (automatically, or with **Upload these laps**). The server checks the
 lap itself (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#uploads)) and
 keeps one leaderboard per class (e.g. GT3) at each track, with each car model's top 5
-drivers (each driver's best lap in that car), under the current
-[ruleset](rulesets/loose-v4.yaml), with the conditions each lap was driven in
-(weather, air and track temperature, fuel at the start of the lap). Laps on the leaderboard appear under
-**Compare against** as "(online)"; other cars of the same class come with a
-warning.
+drivers, under the current [ruleset](rulesets/loose-v5.yaml), with the
+conditions each lap was driven in (weather, air and track temperature, fuel at
+the start of the lap, fixed or open setup). Laps are kept per band of
+conditions (setup type, 5° of track temperature, fuel ≤10 / 10–30 / 30–60 /
+60+ L; see [`lmu_core/bands.py`](src/lmu_core/bands.py)), so the **filters**
+(car, setup, track temperature, fuel) show each driver's best lap in those
+conditions. Laps on the leaderboard appear under **Compare against** as
+"(online)", and clicking one picks it; other cars of the same class come with
+a warning.
 
 Expert laps (`.lap.npz`) in `Documents\LMU Lap Analyser\references` or in
 [`references/`](references/) (shipped with the app) are picked up too.

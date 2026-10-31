@@ -31,6 +31,7 @@ from dash import (
 )
 
 from lmu_core.analysis import Finding, SessionAnalysis, analyse
+from lmu_core.bands import FUEL_BANDS, FUEL_LABELS, TEMP_BAND_C
 from lmu_core.geometry import track_geometry
 from lmu_core.library import (
     load_lap,
@@ -41,13 +42,15 @@ from lmu_core.library import (
 from lmu_core.ruleset import Ruleset
 from webapp.candidates import find_candidates
 from webapp.charts import map_figure, traces_figure
-from webapp.server_client import ServerClient, ServerError
+from webapp.server_client import ServerClient, ServerError, band_filters
 
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 SELF_BEST = "self:best"
 SELF_SECTIONS = "self:sections"
 # Online leaderboard views: the whole class, or one car of it (by its name).
 BOARD_CLASS = "class"
+# The track temperature filter's range; its ends mean "no limit".
+TEMP_MAX_C = 60
 BOARD_CLICKED_ROW = {"backgroundColor": "#dbe6fb"}
 BOARD_STYLES = [
     # The selected car's laps stand out on the class leaderboard.
@@ -173,13 +176,42 @@ def create_app(
                 ]),
                 dcc.Loading(html.Div(id="candidate-status", className="mt"), type="dot"),
                 # Anyone can see the leaderboard; signing in is only for uploading.
-                html.Div(className="row mt", children=[
-                    html.Div(id="board-note", className="grow-text"),
-                    html.Div(id="board-view-wrap", style={"display": "none"}, children=dcc.Dropdown(
-                        id="board-view", clearable=False, searchable=False, value=BOARD_CLASS,
-                        options=[{"label": "All cars in the class", "value": BOARD_CLASS}],
-                        persistence=True, persistence_type="local",
-                    )),
+                html.Div(id="board-note", className="mt"),
+                # Laps are kept per band of conditions (lmu_core.bands), so filtering
+                # shows each driver's best lap in those conditions.
+                html.Div(id="board-filters", className="filters mt", style={"display": "none"},
+                         children=[
+                    html.Div(className="filter", style={"width": 210}, children=[
+                        html.Label("Car", className="muted"),
+                        dcc.Dropdown(id="board-view", clearable=False, searchable=False,
+                                     value=BOARD_CLASS, persistence=True,
+                                     persistence_type="local",
+                                     options=[{"label": "All cars in the class",
+                                               "value": BOARD_CLASS}]),
+                    ]),
+                    html.Div(className="filter", style={"width": 150}, children=[
+                        html.Label("Setup", className="muted"),
+                        dcc.Dropdown(id="board-setup", clearable=False, searchable=False,
+                                     value="any", persistence=True, persistence_type="local",
+                                     options=[{"label": "Any setup", "value": "any"},
+                                              {"label": "Open setup", "value": "open"},
+                                              {"label": "Fixed setup", "value": "fixed"}]),
+                    ]),
+                    html.Div(className="filter", style={"width": 260}, children=[
+                        html.Label("Track temperature (°C)", className="muted"),
+                        dcc.RangeSlider(id="board-temp", min=0, max=TEMP_MAX_C, step=TEMP_BAND_C,
+                                        value=[0, TEMP_MAX_C], persistence=True,
+                                        persistence_type="local",
+                                        marks={t: str(t) for t in range(0, TEMP_MAX_C + 1, 10)}),
+                    ]),
+                    html.Div(className="filter", style={"width": 220}, children=[
+                        html.Label("Fuel at the start of the lap", className="muted"),
+                        dcc.Dropdown(id="board-fuel", multi=True, searchable=False,
+                                     placeholder="Any fuel", value=[], persistence=True,
+                                     persistence_type="local",
+                                     options=[{"label": FUEL_LABELS[b], "value": b}
+                                              for _, b in FUEL_BANDS]),
+                    ]),
                 ]),
                 html.Div(id="board-wrap", className="mt", children=[
                     dash_table.DataTable(
@@ -320,9 +352,9 @@ def create_app(
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
         Input("refs-version", "data"), Input("server-version", "data"),
         Input("board", "active_cell"),
-        State("reference", "value"),
+        State("reference", "value"), State("board", "data"),
     )
-    def reference_options(track, car, recordings, _, __, clicked, current):
+    def reference_options(track, car, recordings, _, __, clicked, current, board_rows):
         # A click on the online leaderboard picks that lap (rows' ids are lap ids).
         wanted = current
         if clicked and clicked.get("row_id") and ctx.triggered_id == "board":
@@ -374,6 +406,11 @@ def create_app(
                 {"label": f"Your best lap · {mine[0]['time']}", "value": SELF_BEST},
                 {"label": "Your fastest time in each section", "value": SELF_SECTIONS},
             ]
+        # A lap picked on a filtered leaderboard may not be its driver's best.
+        picked = next((r for r in board_rows or [] if f"srv:{r['id']}" == wanted), None)
+        if picked and wanted not in {o["value"] for o in options}:
+            options.append({"label": f"{picked['driver']} · {picked['time']} · {picked['car']} "
+                                      f"({picked['conditions']}, online)", "value": wanted})
         values = [o["value"] for o in options]
         empty = ("" if same or online else "No other drivers' laps for this car yet.") + online_note
         if wanted in values:
@@ -489,39 +526,50 @@ def create_app(
 
     @app.callback(
         Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),
-        Output("board-view-wrap", "style"), Output("board-view", "options"),
+        Output("board-filters", "style"), Output("board-view", "options"),
         Output("board-view", "value"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
         Input("server-version", "data"), Input("board-view", "value"),
+        Input("board-setup", "value"), Input("board-temp", "value"),
+        Input("board-fuel", "value"),
     )
-    def board(track, car, recordings, _, view):
+    def board(track, car, recordings, _, view, setup, temp, fuel):
         """The leaderboard for the car's class at this track, with the selected car's
-        laps highlighted; or one car's of that class (the dropdown), or the selected
-        car's if its class is unknown, with your own laps highlighted."""
+        laps highlighted; or one car's of that class (the Car filter), or the selected
+        car's if its class is unknown, with your own laps highlighted. The other
+        filters pick each driver's best lap in those conditions."""
         hide = {"display": "none"}
         if not server() or not track or not car:
             return [], hide, "", hide, no_update, no_update
         car_class = class_of(track, car, recordings)
+        # The cars to pick from: the class's at this track, and the selected one.
+        cars = sorted({b["car"] for b in server_boards()
+                       if b["track"] == track and car_class and b["car_class"] == car_class}
+                      | {car})
+        options = ([{"label": f"All {car_class} cars", "value": BOARD_CLASS}] if car_class
+                   else []) + [{"label": c, "value": c} for c in cars]
+        if not car_class:
+            view = car
+        elif view not in cars:
+            view = BOARD_CLASS
+        combined = view == BOARD_CLASS
+        lo, hi = temp or (0, TEMP_MAX_C)
+        filters = {"setup": None if setup == "any" else setup,
+                   "track_temp_min": lo if lo > 0 else None,
+                   "track_temp_max": hi if hi < TEMP_MAX_C else None, "fuel": fuel}
         try:
-            entries = (server().class_leaderboard(track, car_class) if car_class
-                       else server().leaderboard(track, car))
+            entries = (server().class_leaderboard(track, car_class, **filters) if combined
+                       else server().leaderboard(track, view, **filters))
         except ServerError as exc:
             return [], hide, html.Span(f"Couldn't load the leaderboard: {exc}",
                                        className="muted"), hide, no_update, no_update
-        # The cars to pick from: the class's at this track, and the selected one.
-        cars = sorted({e["car"] for e in entries} | {car})
-        options = [{"label": f"All {car_class} cars", "value": BOARD_CLASS},
-                   *({"label": c, "value": c} for c in cars)]
-        if view not in cars:
-            view = BOARD_CLASS
-        picker = {"width": 230} if car_class else hide
-        combined = bool(car_class) and view == BOARD_CLASS
-        if car_class and not combined:
-            entries = [e for e in entries if e["car"] == view]
         if not entries:
-            what = f"{car_class} cars" if combined else (view if car_class else "this car")
-            return [], hide, html.Span(f"No laps on the leaderboard for {what} at this track yet.",
-                                       className="muted"), picker, options, view
+            if any(v not in (None, []) for v in filters.values()):
+                message = "No laps on the leaderboard match these filters."
+            else:
+                what = f"{car_class} cars" if combined else view
+                message = f"No laps on the leaderboard for {what} at this track yet."
+            return [], hide, html.Span(message, className="muted"), {}, options, view
         best = entries[0]["lap_time_s"]
         rows = [{
             "id": e["id"], "rank": i + 1, "driver": e["driver"], "car": e.get("car", car),
@@ -531,9 +579,9 @@ def create_app(
             "recorded": _fmt_recorded(e["recorded_at"]),
             "selected": int(e.get("car", car) == car if combined else bool(e.get("mine"))),
         } for i, e in enumerate(entries)]
-        title = f"{car_class} at {track}: each car's top drivers" if combined else \
-            f"{view if car_class else car} at {track}: top drivers"
-        return rows, {}, html.B(title), picker, options, view
+        title = (f"{car_class} at {track}: each car's top drivers" if combined
+                 else f"{view} at {track}: top drivers")
+        return rows, {}, html.B(title), {}, options, view
 
     @app.callback(
         Output("board", "style_data_conditional"), Output("board", "active_cell"),
@@ -582,8 +630,7 @@ def create_app(
         if not found:
             return None, hide, status, new_version
         place = " for its car" if _per_car(ruleset) else ""
-        items = [html.Li(f"{c.track} · {c.car} · {_fmt_time(c.lap_time_s)}: "
-                         f"would be #{c.rank}{place}") for c in found]
+        items = [html.Li(f"{_candidate_label(c)}: would be #{c.rank}{place}") for c in found]
         intro = "Your laps that would make the leaderboard" + (
             ":" if signed_in else " (sign in with Steam to add them):")
         return (html.Div([html.B(intro), html.Ul(items)]), {} if signed_in else hide,
@@ -592,17 +639,18 @@ def create_app(
     def _find(recordings, ruleset):
         per_car = _per_car(ruleset)
 
-        def entries_for(track, car, car_class):
+        def entries_for(track, car, car_class, band):
+            filters = band_filters(*band) if band else {}
             if per_car or not car_class:
-                return server().leaderboard(track, car)
-            return server().class_leaderboard(track, car_class)
+                return server().leaderboard(track, car, **filters)
+            return server().class_leaderboard(track, car_class, **filters)
 
         return find_candidates(recordings, ruleset, entries_for, skip=tried)
 
     def _upload(found):
         results, accepted = [], False
         for c in found:
-            label = f"{c.track} · {c.car} · {_fmt_time(c.lap_time_s)}"
+            label = _candidate_label(c)
             try:
                 r = server().upload_lap(c.path, c.lap)
             except ServerError as exc:
@@ -780,6 +828,9 @@ def _info_dict(info) -> dict:
         "session_type": info.session_type, "driver": info.driver,
         "recorded_at": info.recorded_at,
         "laps": [[l.number, l.lap_time_s] for l in info.laps],
+        "setup_fixed": info.setup_fixed,
+        # Each lap's track temperature and fuel bands (lmu_core.bands), by lap number.
+        "lap_bands": {str(l.number): [l.track_temp_band, l.fuel_band] for l in info.laps},
     }
 
 
@@ -787,6 +838,11 @@ def _same_lap(a, b) -> bool:
     fa, fb = a.facts, b.facts
     return (fa.recorded_at, fa.lap_number, fa.driver) == (fb.recorded_at, fb.lap_number, fb.driver) \
         and fa.recorded_at is not None
+
+
+def _candidate_label(c) -> str:
+    band = f" ({c.band})" if c.band else ""
+    return f"{c.track} · {c.car} · {_fmt_time(c.lap_time_s)}{band}"
 
 
 def _per_car(ruleset: Ruleset) -> bool:
@@ -976,6 +1032,9 @@ _INDEX = """<!DOCTYPE html>
   }
   .viz-help { justify-content: space-between; }
   .grow-text { flex: 1; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; }
+  .filter label { display: block; margin-bottom: 2px; }
+  .filter .rc-slider { margin-top: 10px; }
   .finding { cursor: pointer; }
   .finding:hover { background: #f8f9fb; }
   .note { background: #fff8e6; border: 1px solid #f3dc9b; padding: 10px 14px; border-radius: 8px; }

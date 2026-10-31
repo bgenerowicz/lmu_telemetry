@@ -24,13 +24,15 @@ import statistics
 import tempfile
 import time
 import uuid
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
+from lmu_core.bands import BAND_FIELDS, describe, track_temp_band
 from lmu_core.laps import lap_facts, split_laps
 from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap
@@ -42,7 +44,7 @@ from server.config import Settings
 # Track length is checked against earlier accepted laps once there are this many.
 KNOWN_LENGTH_MIN_LAPS = 3
 # Lap fields stored as columns, which leaderboards can be keyed by.
-STORED_FIELDS = {"track", "layout", "car", "car_class", "car_model"}
+STORED_FIELDS = {"track", "layout", "car", "car_class", "car_model", *BAND_FIELDS}
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -157,10 +159,13 @@ def create_app(
 
     @app.get("/api/leaderboards")
     def leaderboards(con=Depends(get_con)) -> list[dict]:
+        # One row per car model (or entry, where the model isn't known), with "laps"
+        # counting drivers: laps are kept per band, but each driver shows once.
         rows = con.execute(
-            "SELECT track, layout, car, car_class, car_model, COUNT(*) AS laps, "
-            "MIN(lap_time_s) AS best "
-            "FROM laps WHERE ruleset_id = ? GROUP BY track, layout, car ORDER BY track, car",
+            "SELECT track, layout, MIN(car) AS car, car_class, car_model, "
+            "COUNT(DISTINCT user_id) AS laps, MIN(lap_time_s) AS best FROM laps "
+            "WHERE ruleset_id = ? GROUP BY track, layout, car_class, COALESCE(car_model, car) "
+            "ORDER BY track, COALESCE(car_model, car)",
             (ruleset.id,),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -168,26 +173,57 @@ def create_app(
     @app.get("/api/leaderboard")
     def leaderboard(track: str, car: str | None = None, car_class: str | None = None,
                     layout: str | None = None, car_model: str | None = None,
+                    setup: str | None = None, track_temp_min: float | None = None,
+                    track_temp_max: float | None = None,
+                    fuel: list[str] | None = Query(default=None),
                     con=Depends(get_con), authorization: str | None = Header(default=None)):
         """Laps at a track, fastest first: one car's (entry or model), one class's, or
-        all. Anyone can read it; for a signed-in app, ``mine`` marks the user's own laps."""
+        all; optionally only laps on a ``fixed`` or ``open`` setup, with the track
+        temperature in a range, and in some fuel bands. Each driver's best matching
+        lap per car, top N per car. Anyone can read it; for a signed-in app, ``mine``
+        marks the user's own laps."""
         me = None
         if authorization and authorization.startswith("Bearer "):
             me = db.user_for_token(con, authorization.removeprefix("Bearer ").strip())
+        bands, band_args = [], []
+        if setup in ("fixed", "open"):
+            bands.append("setup_fixed = ?")
+            band_args.append(int(setup == "fixed"))
+        if track_temp_min is not None:
+            bands.append("track_temp_band >= ?")
+            band_args.append(track_temp_band(track_temp_min))
+        if track_temp_max is not None:
+            bands.append("track_temp_band < ?")
+            band_args.append(track_temp_max)
+        if fuel:
+            bands.append(f"fuel_band IN ({', '.join('?' * len(fuel))})")
+            band_args += fuel
         rows = con.execute(
             "SELECT laps.id, laps.user_id, users.name AS driver, laps.driver_name, "
-            "laps.lap_time_s, laps.car, laps.car_class, laps.layout, laps.recorded_at, "
-            "laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.ADDED_COLUMNS) +
+            "laps.lap_time_s, laps.track, laps.car, laps.car_class, laps.layout, "
+            "laps.recorded_at, laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.ADDED_COLUMNS) +
             " FROM laps JOIN users ON users.id = laps.user_id "
             "WHERE ruleset_id = ? AND track = ? AND (? IS NULL OR car = ?) "
             "AND (? IS NULL OR car_class = ?) AND (? IS NULL OR layout = ?) "
-            "AND (? IS NULL OR car_model = ?) AND users.banned = 0 ORDER BY lap_time_s",
+            "AND (? IS NULL OR car_model = ?) AND users.banned = 0 "
+            + "".join(f"AND {b} " for b in bands) + "ORDER BY lap_time_s",
             (ruleset.id, track, car, car, car_class, car_class, layout, layout,
-             car_model, car_model),
+             car_model, car_model, *band_args),
         ).fetchall()
+        # Laps are kept per band; show each driver's best, and the top N, per car.
+        slot = [c for c in (*ruleset.leaderboard_key, *ruleset.top_n_per)
+                if c not in BAND_FIELDS]
+        seen, per_slot, shown = set(), defaultdict(int), []
+        for r in rows:
+            where = tuple(r[c] for c in slot)
+            if (where, r["user_id"]) in seen or per_slot[where] >= ruleset.top_n:
+                continue
+            seen.add((where, r["user_id"]))
+            per_slot[where] += 1
+            shown.append(r)
         return [{"rank": i, **{k: r[k] for k in r.keys() if k != "user_id"},
                  "mine": me is not None and r["user_id"] == me["id"]}
-                for i, r in enumerate(rows, start=1)]
+                for i, r in enumerate(shown, start=1)]
 
     @app.get("/api/laps/{lap_id}")
     def lap_info(lap_id: str, con=Depends(get_con)) -> dict:
@@ -217,7 +253,8 @@ def create_app(
     def home(con=Depends(get_con)) -> str:
         boards = leaderboards(con)
         rows = "".join(
-            f"<tr><td>{html.escape(b['track'])}</td><td>{html.escape(b['car'])}</td>"
+            f"<tr><td>{html.escape(b['track'])}</td>"
+            f"<td>{html.escape(b['car_model'] or b['car'])}</td>"
             f"<td>{b['laps']}</td><td>{_fmt_time(b['best'])}</td></tr>" for b in boards
         ) or "<tr><td colspan=4>No laps yet.</td></tr>"
         return _page("LMU Lap Analyser", (
@@ -300,9 +337,12 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
 
     board, key = where([*ruleset.leaderboard_key, *ruleset.top_n_per])
     whole_board, whole_key = where(ruleset.leaderboard_key)
-    # The car laps compete within: the entry under top_n_per [car], else the model.
+    # The car laps compete within: the entry under top_n_per [car], else the model;
+    # and the conditions, when laps are kept per band.
     car_name = f.car if "car" in ruleset.top_n_per else (f.car_model or f.car)
     within = f" in the {car_name}" if {"car", "car_model"} & set(ruleset.top_n_per) else ""
+    if set(BAND_FIELDS) & set(ruleset.top_n_per):
+        within += f" ({describe(f.setup_fixed, f.track_temp_band, f.fuel_band)})"
     con.execute("BEGIN IMMEDIATE")
     try:
         own = con.execute(f"SELECT id, lap_time_s FROM laps WHERE {board} AND user_id = ?",
@@ -321,9 +361,10 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
             return 200, _rejected(
                 f"Not fast enough for the top {ruleset.top_n}{within} (it would be #{rank}).",
                 checks=checks, rules=rules)
+        # Overall: drivers with a faster lap anywhere on the leaderboard.
         overall = 1 + con.execute(
-            f"SELECT COUNT(*) FROM laps WHERE {whole_board} AND id != ? AND lap_time_s < ?",
-            (*whole_key, own["id"] if own else "", f.lap_time_s)).fetchone()[0]
+            f"SELECT COUNT(DISTINCT user_id) FROM laps WHERE {whole_board} AND user_id != ? "
+            "AND lap_time_s < ?", (*whole_key, user["id"], f.lap_time_s)).fetchone()[0]
 
         lap_id = uuid.uuid4().hex
         raw, processed = db.lap_files(settings.data_dir, lap_id)
@@ -359,7 +400,8 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
     return 201, {
         "accepted": True, "lap_id": lap_id, "rank": rank, "overall_rank": overall,
         "lap_time_s": f.lap_time_s,
-        "message": f"Accepted: #{rank} on {f.track} in the {car_name}{overall_note}.",
+        "message": f"Accepted: #{rank} on {f.track}{within or ' in the ' + car_name}"
+                   f"{overall_note}.",
         "checks": checks, "rules": rules,
     }
 

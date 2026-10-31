@@ -1,7 +1,8 @@
 """Finding laps: the driver's recordings and the expert reference laps.
 
 - Recordings are LMU ``.duckdb`` files in a telemetry folder. Scanning reads
-  only metadata and lap events, and is cached per file (path, size, mtime), so
+  only metadata, lap events and two slow channels (track temperature and fuel,
+  for each lap's bands), and is cached per file (path, size, mtime), so
   rescanning a folder only opens new or changed files.
 - Reference ("expert") laps are processed laps saved as ``.lap.npz`` files in
   reference folders. They're small and self-describing (see ``ProcessedLap``).
@@ -14,7 +15,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from lmu_core.carmodel import car_model
+import numpy as np
+
+from lmu_core.bands import fuel_band, track_temp_band
+from lmu_core.carmodel import car_model, setup_is_fixed
 from lmu_core.laps import split_laps
 from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap, resample_lap
@@ -26,6 +30,9 @@ REFERENCE_SUFFIX = ".lap.npz"
 class LapEntry:
     number: int
     lap_time_s: float
+    # Bands at the start of the lap (lmu_core.bands).
+    track_temp_band: int | None = None
+    fuel_band: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,7 @@ class RecordingInfo:
     driver: str | None
     recorded_at: str | None
     laps: tuple[LapEntry, ...]
+    setup_fixed: bool | None = None
 
     @property
     def best_lap(self) -> LapEntry | None:
@@ -72,8 +80,11 @@ def scan_folder(folder: str | Path) -> tuple[list[RecordingInfo], list[str]]:
 def _scan_file(path: str, size: int, mtime: float) -> RecordingInfo:
     with Recording(path) as rec:
         meta = rec.metadata
+        temp_at, fuel_at = _sampler(rec, "Track Temperature"), _sampler(rec, "Fuel Level")
         laps = tuple(
-            LapEntry(lap.number, lap.lap_time_s) for lap in split_laps(rec) if lap.is_flying
+            LapEntry(lap.number, lap.lap_time_s, track_temp_band(temp_at(lap.start_ts)),
+                     fuel_band(fuel_at(lap.start_ts)))
+            for lap in split_laps(rec) if lap.is_flying
         )
     return RecordingInfo(
         path=path,
@@ -85,7 +96,18 @@ def _scan_file(path: str, size: int, mtime: float) -> RecordingInfo:
         driver=meta.get("DriverName"),
         recorded_at=meta.get("RecordingTime"),
         laps=laps,
+        setup_fixed=setup_is_fixed(meta.get("CarSetup")),
     )
+
+
+def _sampler(rec: Recording, channel: str):
+    """The channel's value at a time (None if it isn't recorded), reading it once."""
+    if channel not in rec.channels:
+        return lambda t: None
+    ts, values = rec.channel(channel)
+    if not len(ts):
+        return lambda t: None
+    return lambda t: float(np.interp(t, ts, values))
 
 
 def load_lap(path: str | Path, number: int) -> ProcessedLap:

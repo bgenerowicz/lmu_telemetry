@@ -72,7 +72,11 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     ServerClient(server_url, token_for(server_url, "Alice")).upload_lap(ALGARVE, 3)
     app = create_webapp([], tmp_path / "refs", settings={"server_url": server_url})
     [key] = [k for k in app.callback_map if "board.data" in k]
-    board = app.callback_map[key]["callback"].__wrapped__
+    any_conditions = ("any", [0, 60], [])
+
+    def board(*args):
+        return app.callback_map[key]["callback"].__wrapped__(*args, *any_conditions)
+
     rows, style, note, picker, options, view = board(
         "Algarve International Circuit", "McLaren 720S GT3", [], 0, "class")
     assert [(r["rank"], r["driver"], r["selected"]) for r in rows] == [(1, "Alice", 1)]
@@ -93,6 +97,15 @@ def test_app_shows_leaderboard_without_sign_in(server_url, tmp_path):
     *_, view = board("Algarve International Circuit", "McLaren 720S GT3", [], 0, "Gone GT3")
     assert view == "class"
 
+    # Filters: the lap was on an open setup, track ~21°, ~77 L fuel.
+    filtered = app.callback_map[key]["callback"].__wrapped__
+    args = ("Algarve International Circuit", "McLaren 720S GT3", [], 0, "class")
+    assert len(filtered(*args, "open", [20, 25], ["60+"])[0]) == 1
+    rows, _, note, *_ = filtered(*args, "fixed", [0, 60], [])
+    assert rows == [] and "match these filters" in str(note)
+    assert filtered(*args, "any", [25, 60], [])[0] == []
+    assert filtered(*args, "any", [0, 60], ["0-10"])[0] == []
+
 
 def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path):
     from webapp.app import create_app as create_webapp
@@ -103,11 +116,11 @@ def test_app_offers_online_laps_of_other_cars_in_the_class(server_url, tmp_path)
     track = "Algarve International Circuit"
     mine = [{"track": track, "car": "Another GT3 #1", "car_class": "GT3", "laps": []}]
     labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
-                                                                  mine, 0, 0, None, None)[0]]
+                                                                  mine, 0, 0, None, None, None)[0]]
     assert any("Alice" in l and "other car: McLaren 720S GT3" in l for l in labels)
     other_class = [{**mine[0], "car_class": "Hypercar"}]
     labels = [o["label"] for o in options["callback"].__wrapped__(track, "Another GT3 #1",
-                                                                  other_class, 0, 0, None, None)[0]]
+                                                                  other_class, 0, 0, None, None, None)[0]]
     assert labels == []
 
 
@@ -123,7 +136,7 @@ def test_candidates_are_laps_that_would_make_the_leaderboard(server_url):
     ruleset = Ruleset.model_validate(alice.ruleset())
 
     def entries(client):
-        return lambda track, car, car_class: client.leaderboard(track, car)
+        return lambda track, car, car_class, band: client.leaderboard(track, car)
 
     # Alice's best lap is on the board: nothing to add.
     assert find_candidates(recordings, ruleset, entries(alice)) == []
@@ -164,7 +177,31 @@ def test_clicking_a_leaderboard_row_picks_that_lap(server_url, tmp_path):
     context_value.set(AttributeDict(triggered_inputs=[
         {"prop_id": "board.active_cell", "value": clicked}]))
     offered, value, _ = options["callback"].__wrapped__(track, "Another GT3 #1", mine, 0, 0,
-                                                        clicked, None)
+                                                        clicked, None, None)
     assert value == f"srv:{lap_id}"
     assert any(o["value"] == value and o["label"].startswith("#2 Bob") for o in offered)
 
+
+
+def test_candidates_per_band():
+    from lmu_core.library import scan_folder
+    from lmu_core.ruleset import Ruleset
+    from webapp.app import _info_dict
+    from webapp.candidates import find_candidates
+
+    [rec] = [_info_dict(i) for i in scan_folder(ALGARVE.parent)[0]]
+    ruleset = Ruleset.load(ROOT / "rulesets" / "loose-v5.yaml")
+    # Laps 2 and 3 are in the same conditions: only the faster one is suggested...
+    asked = []
+
+    def entries_for(track, car, car_class, band):
+        asked.append(band)
+        return []
+
+    assert [c.lap for c in find_candidates([rec], ruleset, entries_for)] == [3]
+    assert asked == [(False, 20, "60+")]
+    # ...but in different fuel bands, each is the best of its band.
+    rec["lap_bands"]["2"] = [20, "30-60"]
+    found = find_candidates([rec], ruleset, lambda *_: [])
+    assert sorted((c.lap, c.band) for c in found) == [
+        (2, "open setup, track 20–25°, 30–60 L fuel"), (3, "open setup, track 20–25°, 60+ L fuel")]
