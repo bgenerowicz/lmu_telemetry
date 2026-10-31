@@ -11,6 +11,10 @@ A recording has one table per channel plus three metadata tables:
   a ``ts`` column in seconds on the same clock.
 
 Channels with four values (one per wheel) have ``value1..value4`` columns.
+
+Recordings can come from anyone (uploads to the server), so they are opened
+without access to files, the network or extensions, and with no views: a view
+could run any query when one of the tables above is read.
 """
 
 from __future__ import annotations
@@ -22,11 +26,32 @@ from pathlib import Path
 import duckdb
 import numpy as np
 
+# Nothing outside the recording itself: no files, network or extensions, and
+# settings that can't be changed back from inside a query.
+_LOCKED_DOWN = {
+    "enable_external_access": False,
+    "autoload_known_extensions": False,
+    "autoinstall_known_extensions": False,
+    "lock_configuration": True,
+}
+
+
+class UnsafeRecording(ValueError):
+    """The file has things a real LMU recording never has (views)."""
+
 
 class Recording:
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self._con = duckdb.connect(str(self.path), read_only=True)
+        self._con = duckdb.connect(str(self.path), read_only=True, config=_LOCKED_DOWN)
+        try:
+            views = self._con.execute(
+                "select count(*) from duckdb_views() where not internal").fetchone()[0]
+            if views:
+                raise UnsafeRecording(f"{self.path.name} has views; not an LMU recording")
+        except BaseException:
+            self._con.close()
+            raise
         self.metadata: dict[str, str] = dict(
             self._con.execute("select key, value from metadata").fetchall()
         )
@@ -51,7 +76,8 @@ class Recording:
 
     @cached_property
     def start_ts(self) -> float:
-        return self._con.execute('select value from "GPS Time" order by rowid limit 1').fetchone()[0]
+        return self._con.execute(f'select value from {_table("GPS Time")} order by rowid '
+                                 'limit 1').fetchone()[0]
 
     @cached_property
     def end_ts(self) -> float:
@@ -79,16 +105,16 @@ class Recording:
         if name not in self.events:
             raise KeyError(f"no event channel {name!r}")
         ts = np.array(
-            [r[0] for r in self._con.execute(f'select ts from "{name}" order by rowid').fetchall()],
+            [r[0] for r in self._con.execute(
+                f"select ts from {_table(name)} order by rowid").fetchall()],
             dtype=float,
         )
         return ts, self._values(name)
 
     def _count(self, name: str) -> int:
-        return self._con.execute(f'select count(*) from "{name}"').fetchone()[0]
+        return self._con.execute(f"select count(*) from {_table(name)}").fetchone()[0]
 
     def _values(self, name: str) -> np.ndarray:
-        # Names are checked against channelsList/eventsList before reaching here.
         cols = [
             c
             for (c,) in self._con.execute(
@@ -98,7 +124,12 @@ class Recording:
             ).fetchall()
             if c != "ts"
         ]
-        select = ", ".join(f'"{c}"' for c in cols)
-        rows = self._con.execute(f'select {select} from "{name}" order by rowid').fetchall()
+        select = ", ".join(_table(c) for c in cols)
+        rows = self._con.execute(f"select {select} from {_table(name)} order by rowid").fetchall()
         values = np.array(rows, dtype=float).reshape(-1, len(cols))
         return values[:, 0] if len(cols) == 1 else values
+
+
+def _table(name: str) -> str:
+    """A quoted identifier. Names come from the file, so quotes in them are escaped."""
+    return '"' + name.replace('"', '""') + '"'

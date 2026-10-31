@@ -206,6 +206,97 @@ def test_tampered_and_garbage_uploads_rejected(tmp_path, extracts):
     assert upload(client, alice, gzip.compress(b"not a database")).status_code == 400
 
 
+def crafted(extract: bytes, *sql: str) -> bytes:
+    """The lap extract with some SQL run on it."""
+    import tempfile
+
+    import duckdb
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "lap.duckdb"
+        path.write_bytes(gzip.decompress(extract))
+        con = duckdb.connect(str(path))
+        for statement in sql:
+            con.execute(statement)
+        con.close()
+        return gzip.compress(path.read_bytes())
+
+
+def test_crafted_recordings_cant_touch_the_servers_files(tmp_path, extracts):
+    client, _ = make_client(tmp_path)
+    alice = sign_in(client, "Alice")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("SECRET")
+    # A view that reads a file on the server, where the metadata table should be.
+    reads = crafted(extracts[3], "CREATE TABLE real_metadata AS SELECT * FROM metadata",
+                    "DROP TABLE metadata",
+                    "CREATE VIEW metadata AS SELECT * FROM real_metadata UNION ALL "
+                    f"SELECT 'Secret', content FROM read_text('{secret.as_posix()}')")
+    r = upload(client, alice, reads)
+    assert r.status_code == 400 and "SECRET" not in r.text
+    # A column name that ends the quoted identifier and writes a file.
+    written = tmp_path / "written.csv"
+    name = (f'value" FROM "Ground Speed"; COPY (SELECT 42) TO \'{written.as_posix()}\'; '
+            'SELECT "value')
+    sneaky = crafted(extracts[3], f'ALTER TABLE "Ground Speed" ADD COLUMN "{name.replace(chr(34), chr(34) * 2)}" DOUBLE')
+    upload(client, alice, sneaky)
+    assert not written.exists()
+
+
+def test_in_game_driver_name_isnt_served(tmp_path, extracts):
+    import sqlite3
+
+    client, settings = make_client(tmp_path)
+    lap = upload(client, sign_in(client, "Alice"), extracts[3]).json()["lap_id"]
+    params = {"track": "Algarve International Circuit"}
+    for served in (client.get("/api/leaderboard", params=params).text,
+                   client.get(f"/api/laps/{lap}").text):
+        assert "Bas Generowicz" not in served and "Alice" in served
+    npz = settings.data_dir / "laps" / f"{lap}.lap.npz"
+    assert ProcessedLap.load(npz).facts.driver == "Alice"
+
+    # Laps stored before this get the leaderboard name once.
+    p = ProcessedLap.load(npz)
+    import dataclasses
+    dataclasses.replace(p, facts=dataclasses.replace(p.facts, driver="Bas Generowicz")).save(npz)
+    con = sqlite3.connect(settings.data_dir / "lmu.sqlite3")
+    con.execute("PRAGMA user_version = 0")
+    con.close()
+    make_client(tmp_path)
+    assert ProcessedLap.load(npz).facts.driver == "Alice"
+
+
+def test_sign_out_revokes_the_token(tmp_path):
+    client, _ = make_client(tmp_path)
+    alice = sign_in(client, "Alice")
+    assert client.get("/api/me", headers=alice).status_code == 200
+    assert client.post("/api/sign-out", headers=alice).json() == {"signed_out": True}
+    assert client.get("/api/me", headers=alice).status_code == 401
+    assert client.post("/api/sign-out").status_code == 200  # signed out already: fine
+
+
+def test_steam_assertion_must_be_signed():
+    from server import steam
+
+    callback = "https://lmu.example.com/auth/steam/callback"
+    claimed = "https://steamcommunity.com/openid/id/76561198000000001"
+    params = {"openid.mode": "id_res", "openid.op_endpoint": steam.OPENID_URL,
+              "openid.claimed_id": claimed, "openid.identity": claimed,
+              "openid.return_to": callback, "openid.signed": "op_endpoint,return_to"}
+    # Refused before asking Steam (no request is made).
+    assert steam.verify(params, callback) is None
+    assert steam.verify({**params, "openid.identity": claimed[:-1] + "2",
+                         "openid.signed": "op_endpoint,claimed_id,identity,return_to,"
+                                          "response_nonce"}, callback) is None
+
+
+def test_fuel_filter_takes_known_bands_only(tmp_path):
+    client, _ = make_client(tmp_path)
+    params = {"track": "Algarve International Circuit"}
+    assert client.get("/api/leaderboard", params={**params, "fuel": ["0-10", "60+"]}).status_code == 200
+    assert client.get("/api/leaderboard", params={**params, "fuel": ["x"] * 5000}).status_code == 422
+
+
 def test_upload_limits(tmp_path, extracts):
     client, _ = make_client(tmp_path, max_unpacked_mb=1)
     alice = sign_in(client, "Alice")

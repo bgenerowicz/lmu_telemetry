@@ -32,7 +32,7 @@ from urllib.parse import urlencode, urlparse
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from lmu_core.bands import BAND_FIELDS, describe, track_temp_band
+from lmu_core.bands import BAND_FIELDS, FUEL_LABELS, describe, track_temp_band
 from lmu_core.laps import lap_facts, split_laps
 from lmu_core.recording import Recording
 from lmu_core.resample import ProcessedLap
@@ -45,6 +45,9 @@ from server.config import Settings
 KNOWN_LENGTH_MIN_LAPS = 3
 # Lap fields stored as columns, which leaderboards can be keyed by.
 STORED_FIELDS = {"track", "layout", "car", "car_class", "car_model", *BAND_FIELDS}
+# Not served: the in-game driver name (often a real name; laps show the Steam
+# name instead), and internals.
+_PRIVATE_LAP_COLUMNS = ("report_json", "user_id", "file_hash", "driver_name")
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -56,6 +59,8 @@ def create_app(
     settings = settings or Settings.from_env()
     if db.init(settings.data_dir):
         _fill_added_columns(settings)
+    if db.upgrade(settings.data_dir, 1):
+        _hide_driver_names(settings)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
     if unstored:
@@ -134,6 +139,14 @@ def create_app(
         return {"steam_id": user["steam_id"], "name": user["name"],
                 "is_admin": bool(user["is_admin"])}
 
+    @app.post("/api/sign-out")
+    def sign_out(authorization: str | None = Header(default=None),
+                 con: sqlite3.Connection = Depends(get_con)) -> dict:
+        """Revoke this sign-in's token (the app forgets it too)."""
+        if authorization and authorization.startswith("Bearer "):
+            db.revoke_token(con, authorization.removeprefix("Bearer ").strip())
+        return {"signed_out": True}
+
     @app.delete("/api/me")
     def delete_me(user=Depends(current_user), con=Depends(get_con)) -> dict:
         """Delete the account and all its laps."""
@@ -196,10 +209,13 @@ def create_app(
             bands.append("track_temp_band < ?")
             band_args.append(track_temp_max)
         if fuel:
+            fuel = sorted(set(fuel))
+            if not set(fuel) <= set(FUEL_LABELS):
+                raise HTTPException(422, f"fuel must be among {sorted(FUEL_LABELS)}.")
             bands.append(f"fuel_band IN ({', '.join('?' * len(fuel))})")
             band_args += fuel
         rows = con.execute(
-            "SELECT laps.id, laps.user_id, users.name AS driver, laps.driver_name, "
+            "SELECT laps.id, laps.user_id, users.name AS driver, "
             "laps.lap_time_s, laps.track, laps.car, laps.car_class, laps.layout, "
             "laps.recorded_at, laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.ADDED_COLUMNS) +
             " FROM laps JOIN users ON users.id = laps.user_id "
@@ -228,8 +244,9 @@ def create_app(
     @app.get("/api/laps/{lap_id}")
     def lap_info(lap_id: str, con=Depends(get_con)) -> dict:
         row = _lap_row(con, lap_id)
-        info = {k: row[k] for k in row.keys() if k not in ("report_json", "user_id", "file_hash")}
-        return {**info, "report": json.loads(row["report_json"])}
+        info = {k: row[k] for k in row.keys() if k not in _PRIVATE_LAP_COLUMNS}
+        driver = con.execute("SELECT name FROM users WHERE id = ?", (row["user_id"],)).fetchone()
+        return {**info, "driver": driver["name"], "report": json.loads(row["report_json"])}
 
     @app.get("/api/laps/{lap_id}/lap.npz")
     def lap_file(lap_id: str, con=Depends(get_con)) -> FileResponse:
@@ -269,7 +286,8 @@ def create_app(
             "<p>When you sign in with Steam we store your Steam ID and Steam display name. "
             "When you upload a lap we store the lap's telemetry (one lap cut from your LMU "
             "recording, including the in-game driver name and car setup) and show your "
-            "display name and lap time on the leaderboard. Laps that drop out of the top "
+            "display name, lap time and the lap's telemetry on the leaderboard; the in-game "
+            "driver name is not shown. Laps that drop out of the top "
             "are deleted.</p><p>You can delete your account and all your laps at any time "
             "from the app.</p>"))
 
@@ -369,7 +387,7 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
         lap_id = uuid.uuid4().hex
         raw, processed = db.lap_files(settings.data_dir, lap_id)
         raw.write_bytes(data)
-        v.processed.save(processed)
+        _served(v.processed, user["name"]).save(processed)
         row = {
             "id": lap_id, "user_id": user["id"], "ruleset_id": ruleset.id, "track": f.track,
             "layout": f.layout, "car": f.car, "car_class": f.car_class,
@@ -422,6 +440,27 @@ def _fill_added_columns(settings: Settings) -> None:
             con.execute("UPDATE laps SET " + ", ".join(f"{c} = ?" for c in added) +
                         " WHERE id = ?", (*added.values(), lap_id))
             dataclasses.replace(p, facts=dataclasses.replace(p.facts, **added)).save(processed)
+    finally:
+        con.close()
+
+
+def _served(lap: ProcessedLap, name: str) -> ProcessedLap:
+    """The processed lap as anyone may download it: with the driver's leaderboard
+    name, not the in-game one."""
+    return dataclasses.replace(lap, facts=dataclasses.replace(lap.facts, driver=name))
+
+
+def _hide_driver_names(settings: Settings) -> None:
+    """Processed laps stored with the in-game driver name get the leaderboard name."""
+    con = db.connect(settings.data_dir)
+    try:
+        for lap_id, name in con.execute(
+                "SELECT laps.id, users.name FROM laps JOIN users ON users.id = laps.user_id"):
+            _, processed = db.lap_files(settings.data_dir, lap_id)
+            try:
+                _served(ProcessedLap.load(processed), name).save(processed)
+            except Exception:  # noqa: BLE001 - a lap that can't be read isn't served either
+                continue
     finally:
         con.close()
 

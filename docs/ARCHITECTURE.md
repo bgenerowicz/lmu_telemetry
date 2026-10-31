@@ -71,7 +71,9 @@ Windows exe with PyInstaller, bundling `references/`.
 - `extract.py` cuts one lap out of a recording (all channels, full rate, a
   couple of seconds either side) into an LMU-style DuckDB file, gzipped:
   ~1.8 MB instead of ~13 MB for a session. The server reads it with the same
-  code as a full recording.
+  code as a full recording. An upload is a database from anyone, so
+  `Recording` opens every file without access to files, the network or
+  extensions, refuses files with views, and escapes table and column names.
 - `verify.py` is what the server runs on an extract, recomputing everything
   itself: a timed lap that didn't start in the pits; official lap time equals
   start-to-finish time; sector splits sit where the sector changes happen;
@@ -95,9 +97,11 @@ The server (`src/server`): FastAPI + SQLite.
   driver keeps one lap (their best) per car there; laps pushed out are deleted. Duplicates are found by lap content (recording
   time, lap, time, track, car), not file bytes.
 - Stored per lap: the extract (for audits) and the processed `.lap.npz`
-  (served at `/api/laps/{id}/lap.npz` for the app to compare against).
+  (served at `/api/laps/{id}/lap.npz` for the app to compare against). The
+  in-game driver name (often a real name) is never served: the API and the
+  served lap show the Steam name.
 - `server.admin` for moderation; `DELETE /api/me` deletes an account and its
-  laps.
+  laps; `POST /api/sign-out` revokes a token (the app calls it on sign-out).
 
 ## What the recordings contain
 

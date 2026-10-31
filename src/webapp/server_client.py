@@ -58,6 +58,15 @@ class ServerClient:
     def me(self) -> dict:
         return self._get("/api/me")
 
+    def sign_out(self) -> None:
+        """Revoke the token on the server; best effort (the app forgets it anyway)."""
+        if not self.token:
+            return
+        try:
+            httpx.post(f"{self.url}/api/sign-out", headers=self._headers(), timeout=TIMEOUT)
+        except httpx.HTTPError:
+            pass
+
     def ruleset(self) -> dict:
         return self._get("/api/ruleset")
 

@@ -691,6 +691,8 @@ def create_app(
         prevent_initial_call=True,
     )
     def sign_out(_, version):
+        if server():
+            server().sign_out()
         remember(server_token=None, server_name=None)
         return version + 1
 
@@ -853,9 +855,10 @@ def _info_dict(info) -> dict:
 
 
 def _same_lap(a, b) -> bool:
+    # Not by driver: laps from the server carry the leaderboard name, not the game's.
     fa, fb = a.facts, b.facts
-    return (fa.recorded_at, fa.lap_number, fa.driver) == (fb.recorded_at, fb.lap_number, fb.driver) \
-        and fa.recorded_at is not None
+    return (fa.recorded_at, fa.lap_number) == (fb.recorded_at, fb.lap_number) \
+        and fa.recorded_at is not None and abs(fa.lap_time_s - fb.lap_time_s) < 0.0005
 
 
 def _candidate_label(c) -> str:

@@ -89,6 +89,19 @@ def init(data_dir: Path) -> list[str]:
     return added
 
 
+def upgrade(data_dir: Path, version: int) -> bool:
+    """Mark the database as at ``version`` (SQLite's user_version); True if it was
+    older, so the caller runs that version's one-off migration."""
+    con = connect(data_dir)
+    try:
+        if con.execute("PRAGMA user_version").fetchone()[0] >= version:
+            return False
+        con.execute(f"PRAGMA user_version = {int(version)}")
+        return True
+    finally:
+        con.close()
+
+
 def lap_files(data_dir: Path, lap_id: str) -> tuple[Path, Path]:
     """The uploaded extract (kept for audits) and the processed lap (served to apps)."""
     folder = data_dir / "laps"
@@ -115,6 +128,10 @@ def user_for_token(con: sqlite3.Connection, token: str) -> sqlite3.Row | None:
         "SELECT users.* FROM tokens JOIN users ON users.id = tokens.user_id "
         "WHERE token_hash = ?", (_hash(token),),
     ).fetchone()
+
+
+def revoke_token(con: sqlite3.Connection, token: str) -> None:
+    con.execute("DELETE FROM tokens WHERE token_hash = ?", (_hash(token),))
 
 
 def use_nonce(con: sqlite3.Connection, nonce: str) -> bool:

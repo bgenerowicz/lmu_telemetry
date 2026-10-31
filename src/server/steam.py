@@ -15,6 +15,7 @@ import httpx
 OPENID_URL = "https://steamcommunity.com/openid/login"
 _NS = "http://specs.openid.net/auth/2.0"
 _CLAIMED_ID = re.compile(r"^https://steamcommunity\.com/openid/id/(\d{17})$")
+_SIGNED = {"op_endpoint", "claimed_id", "identity", "return_to", "response_nonce"}
 
 
 def login_url(return_to: str, realm: str) -> str:
@@ -33,10 +34,15 @@ def verify(params: dict[str, str], expected_return_to: str) -> str | None:
     match = _CLAIMED_ID.match(params.get("openid.claimed_id", ""))
     if not match or params.get("openid.mode") != "id_res":
         return None
+    if params.get("openid.identity") != params["openid.claimed_id"]:
+        return None
     if params.get("openid.op_endpoint") != OPENID_URL:
         return None
     # The assertion must be for our callback, not one made for another site.
     if params.get("openid.return_to", "").split("?")[0] != expected_return_to.split("?")[0]:
+        return None
+    # Only trust fields Steam signed (Steam always signs these).
+    if not _SIGNED <= set(params.get("openid.signed", "").split(",")):
         return None
     check = {k: v for k, v in params.items() if k.startswith("openid.")}
     check["openid.mode"] = "check_authentication"
