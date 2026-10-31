@@ -182,6 +182,30 @@ def test_app_lists_laps_to_upload_and_uploads_only_picked_ones(server_url, tmp_p
     assert picked == [] and "Pick the laps" in str(status)
 
 
+def test_app_shows_or_hides_your_name(server_url, tmp_path):
+    from dash import no_update
+
+    from webapp.app import create_app as create_webapp
+
+    app = create_webapp([], tmp_path / "refs", settings={
+        "server_url": server_url, "server_token": token_for(server_url, "Erin")})
+    status = app.callback_map[next(k for k in app.callback_map if "show-name.value" in k
+                                   and "server-status.children" in k)]["callback"].__wrapped__
+    toggle = app.callback_map[next(k for k in app.callback_map if k.startswith(
+        "..server-version.data@") and "show-name" not in k and "server-status" in k)]
+    toggle = toggle["callback"].__wrapped__
+    text, _, _, box, value = status(0)
+    assert text.startswith("Signed in as Erin.") and box == {} and value == ["show"]
+    # Unticked: changed on the server, and the status says what others see.
+    assert toggle([], 3) == (4, no_update)
+    text, *_, value = status(4)
+    assert "Others see you as Anonymous #" in text and value == []
+    # The box set from the server doesn't change it again.
+    assert toggle([], 4) == (no_update,) * 2
+    assert toggle(["show"], 4)[0] == 5
+    assert status(5)[4] == ["show"]
+
+
 def test_errors_are_readable(server_url):
     with pytest.raises(ServerError, match="Sign in"):
         ServerClient(server_url).upload_lap(ALGARVE, 3)

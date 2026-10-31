@@ -60,6 +60,17 @@ CONDITION_COLUMNS = {
 # Columns added since the first version, filled from each lap's LapFacts.
 ADDED_COLUMNS = {**CONDITION_COLUMNS, "car_model": "TEXT", "track_temp_band": "INTEGER",
                  "fuel_band": "TEXT"}
+# Columns added to users since the first version, with their defaults.
+USER_COLUMNS = {
+    # Whether the user's Steam name is shown with their laps; else "Anonymous #<id>".
+    "show_name": "INTEGER NOT NULL DEFAULT 1",
+}
+# The name others see for a user (``users`` in the query), in SQL and in Python.
+PUBLIC_NAME = "CASE WHEN users.show_name THEN users.name ELSE 'Anonymous #' || users.id END"
+
+
+def public_name(user: sqlite3.Row) -> str:
+    return user["name"] if user["show_name"] else f"Anonymous #{user['id']}"
 
 
 def connect(data_dir: Path) -> sqlite3.Connection:
@@ -83,6 +94,10 @@ def init(data_dir: Path) -> list[str]:
         added = [c for c in ADDED_COLUMNS if c not in have]
         for c in added:
             con.execute(f"ALTER TABLE laps ADD COLUMN {c} {ADDED_COLUMNS[c]}")
+        have_user = {r["name"] for r in con.execute("PRAGMA table_info(users)")}
+        for c, kind in USER_COLUMNS.items():
+            if c not in have_user:
+                con.execute(f"ALTER TABLE users ADD COLUMN {c} {kind}")
     finally:
         con.close()
     (data_dir / "laps").mkdir(parents=True, exist_ok=True)

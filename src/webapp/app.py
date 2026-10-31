@@ -164,6 +164,10 @@ def create_app(
                            className="btn"),
                     html.Button("Sign out", id="sign-out", className="btn"),
                 ]),
+                # Signed in: whether others see your Steam name with your laps.
+                dcc.Checklist(id="show-name", className="mt", value=[], style={"display": "none"},
+                              options=[{"label": " Show my Steam name with my laps (else "
+                                                 "they show as Anonymous)", "value": "show"}]),
                 # Laps from the telemetry folder that would make the leaderboard;
                 # signed in, pick which to upload.
                 dcc.Loading(html.Div(id="candidates", className="mt"), type="dot"),
@@ -507,25 +511,48 @@ def create_app(
 
     @app.callback(
         Output("server-status", "children"), Output("sign-in", "style"),
-        Output("sign-out", "style"),
+        Output("sign-out", "style"), Output("show-name", "style"), Output("show-name", "value"),
         Input("server-version", "data"),
     )
     def server_status(_):
         hide, show = {"display": "none"}, {}
         if not server():
-            return "No leaderboard server set up.", hide, hide
+            return "No leaderboard server set up.", hide, hide, hide, no_update
         try:
             health = server().health()
         except ServerError as exc:
-            return str(exc), hide, hide
+            return str(exc), hide, hide, hide, no_update
         rules = f"Ruleset: {health.get('ruleset')}."
         if not settings.get("server_token"):
-            return f"Connected. Sign in to upload laps. {rules}", show, hide
+            return f"Connected. Sign in to upload laps. {rules}", show, hide, hide, no_update
         try:
             me = server().me()
         except ServerError as exc:
-            return f"{exc} {rules}", show, hide
-        return f"Signed in as {me['name']}. {rules}", hide, show
+            return f"{exc} {rules}", show, hide, hide, no_update
+        shown = me.get("show_name", True)
+        others = "" if shown else f" Others see you as {me.get('public_name', 'Anonymous')}."
+        return (f"Signed in as {me['name']}.{others} {rules}", hide, show, show,
+                ["show"] if shown else [])
+
+    @app.callback(
+        Output("server-version", "data", allow_duplicate=True),
+        Output("server-status", "children", allow_duplicate=True),
+        Input("show-name", "value"), State("server-version", "data"),
+        prevent_initial_call=True,
+    )
+    def set_show_name(value, version):
+        """Ticking or unticking changes it on the server. server_status sets the box
+        from the server too; then nothing changes here, so this doesn't loop."""
+        if not server() or not settings.get("server_token"):
+            return no_update, no_update
+        wanted = "show" in (value or [])
+        try:
+            if server().me().get("show_name", True) == wanted:
+                return no_update, no_update
+            server().set_show_name(wanted)
+        except ServerError as exc:
+            return no_update, f"Couldn't change how your name is shown: {exc}"
+        return version + 1, no_update
 
     @app.callback(
         Output("board", "data"), Output("board-wrap", "style"), Output("board-note", "children"),

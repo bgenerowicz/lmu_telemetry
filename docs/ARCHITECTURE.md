@@ -109,7 +109,9 @@ The server (`src/server`): FastAPI + SQLite.
   (served at `/api/laps/{id}/lap.npz` for the app to compare against, with
   the lap's setup). The
   in-game driver name (often a real name) is never served: the API and the
-  served lap show the Steam name.
+  served lap show the Steam name, or "Anonymous #<user id>" for drivers who
+  turned it off (`POST /api/me/show-name`). The name goes into the lap file as
+  it's downloaded, so a change shows at once.
 - `server.admin` for moderation; `DELETE /api/me` deletes an account and its
   laps; `POST /api/sign-out` revokes a token (the app calls it on sign-out).
 

@@ -16,6 +16,7 @@ import dataclasses
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 
@@ -60,11 +61,15 @@ class ProcessedLap:
     def time_s(self) -> np.ndarray:
         return self.data["time_s"]
 
-    def save(self, path: str | Path) -> None:
-        """Save as a compressed NumPy archive (``.npz``), facts and setup included as JSON."""
+    def save(self, path: str | Path | BinaryIO) -> None:
+        """Save as a compressed NumPy archive (``.npz``), facts and setup included as
+        JSON; to a file, or into an open binary stream."""
         extra = {"_facts": np.array(json.dumps(dataclasses.asdict(self.facts)))}
         if self.setup:
             extra["_setup"] = np.array(json.dumps(self.setup))
+        if hasattr(path, "write"):
+            np.savez_compressed(path, **extra, **self.data)
+            return
         with open(path, "wb") as f:
             np.savez_compressed(f, **extra, **self.data)
 

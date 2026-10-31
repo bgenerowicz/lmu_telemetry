@@ -62,6 +62,20 @@ class ServerClient:
     def me(self) -> dict:
         return self._get("/api/me")
 
+    def set_show_name(self, show: bool) -> dict:
+        """Show your Steam name with your laps, or not (anonymous). Returns ``me()``."""
+        try:
+            r = httpx.post(f"{self.url}/api/me/show-name", params={"show": show},
+                           headers=self._headers(), timeout=TIMEOUT)
+        except httpx.HTTPError as exc:
+            raise ServerError(f"Can't reach the server ({exc.__class__.__name__}).") from exc
+        if r.status_code == 401:
+            raise ServerError("Not signed in, or the sign-in expired.")
+        if r.status_code >= 400:
+            raise ServerError(_detail(r))
+        self.forget_cache()
+        return r.json()
+
     def sign_out(self) -> None:
         """Revoke the token on the server; best effort (the app forgets it anyway)."""
         if not self.token:

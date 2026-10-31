@@ -64,7 +64,8 @@ To add your own laps, **Sign in with Steam**. The app lists your laps that
 would make the leaderboard; tick the ones you want and click **Upload
 selected laps**. The server checks each lap before adding it: a complete,
 timed lap that stays on track, in the dry. The leaderboard shows your Steam
-name, and others can see each lap's telemetry and car setup; see the server's
+name (untick **Show my Steam name** to show as Anonymous instead, for all your
+laps), and others can see each lap's telemetry and car setup; see the server's
 privacy page for what it stores.
 
 ## Running from source

@@ -17,6 +17,7 @@ import dataclasses
 import gzip
 import hashlib
 import html
+import io
 import json
 import sqlite3
 import statistics
@@ -29,8 +30,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode, urlparse
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, RedirectResponse,
-                               Response)
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from lmu_core.bands import BAND_FIELDS, FUEL_LABELS, describe, track_temp_band
 from lmu_core.laps import lap_facts, split_laps
@@ -148,8 +148,17 @@ def create_app(
 
     @app.get("/api/me")
     def me(user: sqlite3.Row = Depends(current_user)) -> dict:
+        """``name``: the Steam name; ``public_name``: what others see with your laps."""
         return {"steam_id": user["steam_id"], "name": user["name"],
-                "is_admin": bool(user["is_admin"])}
+                "is_admin": bool(user["is_admin"]), "show_name": bool(user["show_name"]),
+                "public_name": db.public_name(user)}
+
+    @app.post("/api/me/show-name")
+    def set_show_name(show: bool, user=Depends(current_user), con=Depends(get_con)) -> dict:
+        """Show your Steam name with your laps, or "Anonymous #<n>" instead; for all
+        your laps, at once."""
+        con.execute("UPDATE users SET show_name = ? WHERE id = ?", (int(show), user["id"]))
+        return me(con.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
 
     @app.post("/api/sign-out")
     def sign_out(authorization: str | None = Header(default=None),
@@ -227,7 +236,7 @@ def create_app(
             bands.append(f"fuel_band IN ({', '.join('?' * len(fuel))})")
             band_args += fuel
         rows = con.execute(
-            "SELECT laps.id, laps.user_id, users.name AS driver, "
+            f"SELECT laps.id, laps.user_id, {db.PUBLIC_NAME} AS driver, "
             "laps.lap_time_s, laps.track, laps.car, laps.car_class, laps.layout, "
             "laps.recorded_at, laps.uploaded_at, " + ", ".join(f"laps.{c}" for c in db.ADDED_COLUMNS) +
             " FROM laps JOIN users ON users.id = laps.user_id "
@@ -257,15 +266,19 @@ def create_app(
     def lap_info(lap_id: str, con=Depends(get_con)) -> dict:
         row = _lap_row(con, lap_id)
         info = {k: row[k] for k in row.keys() if k not in _PRIVATE_LAP_COLUMNS}
-        driver = con.execute("SELECT name FROM users WHERE id = ?", (row["user_id"],)).fetchone()
-        return {**info, "driver": driver["name"], "report": json.loads(row["report_json"])}
+        driver = con.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
+        return {**info, "driver": db.public_name(driver), "report": json.loads(row["report_json"])}
 
     @app.get("/api/laps/{lap_id}/lap.npz")
-    def lap_file(lap_id: str, con=Depends(get_con)) -> FileResponse:
-        _lap_row(con, lap_id)
+    def lap_file(lap_id: str, con=Depends(get_con)) -> Response:
+        """The processed lap, with the driver's name as it is now (shown or not)."""
+        row = _lap_row(con, lap_id)
+        driver = con.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
         _, processed = db.lap_files(settings.data_dir, lap_id)
-        return FileResponse(processed, media_type="application/octet-stream",
-                            filename=f"{lap_id}.lap.npz")
+        out = io.BytesIO()
+        _served(ProcessedLap.load(processed), db.public_name(driver)).save(out)
+        return Response(out.getvalue(), media_type="application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="{lap_id}.lap.npz"'})
 
     @app.delete("/api/laps/{lap_id}")
     def delete_lap(lap_id: str, user=Depends(current_user), con=Depends(get_con)) -> dict:
@@ -361,7 +374,11 @@ def create_app(
             "recording, including the in-game driver name and car setup) and show your "
             "display name, lap time, the lap's telemetry and its car setup on the "
             "leaderboard; the in-game driver name is not shown. Laps that drop out of the top "
-            "are deleted.</p><p>You can delete your account and all your laps at any time "
+            "are deleted.</p><p>In the app you can choose to show \"Anonymous\" with a "
+            "number instead of your Steam name, for all your laps at once. The server still "
+            "knows your Steam ID, to know which laps are yours; copies of your laps that "
+            "others downloaded before, and search engines until they look again, keep the "
+            "name they had.</p><p>You can delete your account and all your laps at any time "
             "from the app.</p>"))
 
     return app

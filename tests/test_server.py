@@ -5,6 +5,7 @@ track, lap 2 is 1:52.418, lap 3 is 1:51.602.
 """
 
 import gzip
+import io
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -443,6 +444,34 @@ def test_leaderboard_marks_your_own_laps(tmp_path, extracts):
     assert [e["mine"] for e in client.get("/api/leaderboard", params=params,
                                           headers=bob).json()] == [False]
     assert [e["mine"] for e in client.get("/api/leaderboard", params=params).json()] == [False]
+
+
+def test_drivers_can_hide_their_name(tmp_path, extracts):
+    client, _ = make_client(tmp_path)
+    alice = sign_in(client, "Alice")
+    upload(client, alice, extracts[3])
+    params = {"track": "Algarve International Circuit", "car_model": "McLaren 720S GT3"}
+    [lap] = client.get("/api/leaderboard", params=params).json()
+    assert lap["driver"] == "Alice"
+    assert client.get("/api/me", headers=alice).json()["show_name"] is True
+
+    me = client.post("/api/me/show-name", params={"show": False}, headers=alice).json()
+    anonymous = me["public_name"]
+    assert me["show_name"] is False and anonymous.startswith("Anonymous #")
+    # Everywhere others see it, at once: the board, the lap, its download, its page.
+    assert client.get("/api/leaderboard", params=params).json()[0]["driver"] == anonymous
+    assert client.get(f"/api/laps/{lap['id']}").json()["driver"] == anonymous
+    r = client.get(f"/api/laps/{lap['id']}/lap.npz")
+    assert ProcessedLap.load(io.BytesIO(r.content)).facts.driver == anonymous
+    page = client.get("/leaderboards/Algarve%20International%20Circuit/McLaren%20720S%20GT3").text
+    assert anonymous in page and "Alice" not in page
+    # Your own app still knows who you are.
+    assert client.get("/api/me", headers=alice).json()["name"] == "Alice"
+
+    client.post("/api/me/show-name", params={"show": True}, headers=alice)
+    r = client.get(f"/api/laps/{lap['id']}/lap.npz")
+    assert ProcessedLap.load(io.BytesIO(r.content)).facts.driver == "Alice"
+    assert client.post("/api/me/show-name", params={"show": False}).status_code == 401
 
 
 def test_pages_for_search_engines(tmp_path, extracts):
