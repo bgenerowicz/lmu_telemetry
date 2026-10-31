@@ -106,6 +106,10 @@ def resample_lap(rec: Recording, lap: Lap, step_m: float = 1.0) -> ProcessedLap:
         name = next((n for n in names if n in rec.channels), None)
         if name is not None:
             ts, values = rec.channel(name)
+            if column.endswith("_pct") and rec.channels[name][1] != "%":
+                # Recordings up to about April 2026 give steering as a
+                # fraction (-1 to 1), with no unit.
+                values = values * 100
             data[column] = np.interp(t_grid, ts, values)
     for column, name in EVENTS.items():
         if name in rec.events:

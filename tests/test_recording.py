@@ -84,3 +84,20 @@ def test_save_load_round_trip(rec, tmp_path):
     assert loaded.facts.driver == "Bas Generowicz"
     assert loaded.data.keys() == processed.data.keys()
     np.testing.assert_array_equal(loaded.time_s, processed.time_s)
+
+
+def test_steering_given_as_a_fraction_is_read_as_percent(rec, monkeypatch):
+    lap = split_laps(rec)[3]
+    expected = resample_lap(rec, lap).data["steering_pct"]
+    # As recordings up to about April 2026 have it: -1 to 1, no unit.
+    name = "Steering Pos Unfiltered"
+    freq, _ = rec.channels[name]
+    channel = rec.channel
+
+    def old_channel(n):
+        ts, values = channel(n)
+        return ts, values / 100 if n == name else values
+
+    monkeypatch.setitem(rec.channels, name, (freq, ""))
+    monkeypatch.setattr(rec, "channel", old_channel)
+    np.testing.assert_allclose(resample_lap(rec, lap).data["steering_pct"], expected)

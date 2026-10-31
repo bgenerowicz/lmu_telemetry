@@ -60,8 +60,9 @@ def create_app(
         _fill_added_columns(settings)
     if db.upgrade(settings.data_dir, 1):
         _hide_driver_names(settings)
-    # 2: setups and sectors; 3: each setting's step as well as its text.
-    if any([db.upgrade(settings.data_dir, 2), db.upgrade(settings.data_dir, 3)]):
+    # 2: setups and sectors; 3: each setting's step as well as its text; 4: older
+    # recordings' steering in percent.
+    if any([db.upgrade(settings.data_dir, v) for v in (2, 3, 4)]):
         _reprocess_laps(settings)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
