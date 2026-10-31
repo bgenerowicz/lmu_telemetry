@@ -75,3 +75,14 @@ def test_conditions_in_one_line():
     assert _fmt_conditions({"weather": "Clear", "setup_fixed": 1}) == "Clear · fixed setup"
     assert _fmt_conditions({"setup_fixed": False}) == "open setup"
     assert _fmt_conditions({}) == ""
+
+
+def test_active_filters():
+    from webapp.app import _active_filters
+
+    assert _active_filters("class", "any", [0, 60], []) == ""
+    assert _active_filters(None, None, None, None) == ""
+    assert _active_filters("McLaren 720S GT3", "open", [20, 35], ["60+", "0-10"]) == (
+        "McLaren 720S GT3 · open setup · track 20–35° · ≤10 L, 60+ L fuel")
+    assert _active_filters("class", "fixed", [25, 60], []) == "fixed setup · track ≥25°"
+    assert _active_filters("class", "any", [0, 30], []) == "track ≤30°"

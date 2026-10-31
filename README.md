@@ -42,9 +42,9 @@ drivers, under the current [ruleset](rulesets/loose-v5.yaml), with the
 conditions each lap was driven in (weather, air and track temperature, fuel at
 the start of the lap, fixed or open setup). Laps are kept per band of
 conditions (setup type, 5° of track temperature, fuel ≤10 / 10–30 / 30–60 /
-60+ L; see [`lmu_core/bands.py`](src/lmu_core/bands.py)), so the **filters**
-(car, setup, track temperature, fuel) show each driver's best lap in those
-conditions. Laps on the leaderboard appear under **Compare against** as
+60+ L; see [`lmu_core/bands.py`](src/lmu_core/bands.py)), so the **Filters**
+section (car, setup, track temperature, fuel; folded away, with the active
+filters in its header) shows each driver's best lap in those conditions. Laps on the leaderboard appear under **Compare against** as
 "(online)", and clicking one picks it; other cars of the same class come with
 a warning.
 

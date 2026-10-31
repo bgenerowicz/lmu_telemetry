@@ -178,9 +178,12 @@ def create_app(
                 # Anyone can see the leaderboard; signing in is only for uploading.
                 html.Div(id="board-note", className="mt"),
                 # Laps are kept per band of conditions (lmu_core.bands), so filtering
-                # shows each driver's best lap in those conditions.
-                html.Div(id="board-filters", className="filters mt", style={"display": "none"},
-                         children=[
+                # shows each driver's best lap in those conditions. Folded away, with
+                # the active filters in its header.
+                html.Details(id="board-filters", className="board-filters mt",
+                             style={"display": "none"}, children=[
+                  html.Summary(id="board-filters-summary", children="Filters"),
+                  html.Div(className="filters", children=[
                     html.Div(className="filter", style={"width": 210}, children=[
                         html.Label("Car", className="muted"),
                         dcc.Dropdown(id="board-view", clearable=False, searchable=False,
@@ -212,6 +215,7 @@ def create_app(
                                      options=[{"label": FUEL_LABELS[b], "value": b}
                                               for _, b in FUEL_BANDS]),
                     ]),
+                  ]),
                 ]),
                 html.Div(id="board-wrap", className="mt", children=[
                     dash_table.DataTable(
@@ -584,6 +588,15 @@ def create_app(
         return rows, {}, html.B(title), {}, options, view
 
     @app.callback(
+        Output("board-filters-summary", "children"),
+        Input("board-view", "value"), Input("board-setup", "value"),
+        Input("board-temp", "value"), Input("board-fuel", "value"),
+    )
+    def board_filters_summary(view, setup, temp, fuel):
+        active = _active_filters(view, setup, temp, fuel)
+        return ["Filters", html.Span(f": {active}" if active else ": none", className="muted")]
+
+    @app.callback(
         Output("board", "style_data_conditional"), Output("board", "active_cell"),
         Output("board", "selected_cells"),
         Input("board", "active_cell"), Input("board", "data"),
@@ -889,6 +902,27 @@ def _fmt_conditions(facts: dict) -> str:
     return " · ".join(p for p in parts if p)
 
 
+def _active_filters(view: str | None, setup: str | None, temp: list | None,
+                    fuel: list | None) -> str:
+    """The leaderboard filters that are set, e.g. "McLaren 720S GT3 · open setup ·
+    track 20–35° · ≤10 L fuel"; empty when none are."""
+    parts = []
+    if view and view != BOARD_CLASS:
+        parts.append(view)
+    if setup in ("open", "fixed"):
+        parts.append(f"{setup} setup")
+    lo, hi = temp or (0, TEMP_MAX_C)
+    if lo > 0 and hi < TEMP_MAX_C:
+        parts.append(f"track {lo}–{hi}°")
+    elif lo > 0:
+        parts.append(f"track ≥{lo}°")
+    elif hi < TEMP_MAX_C:
+        parts.append(f"track ≤{hi}°")
+    if fuel:
+        parts.append(", ".join(FUEL_LABELS[b] for _, b in FUEL_BANDS if b in fuel) + " fuel")
+    return " · ".join(parts)
+
+
 _SYNC_JS = """
 window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (function () {
   const none = () => window.dash_clientside.no_update;
@@ -1032,6 +1066,8 @@ _INDEX = """<!DOCTYPE html>
   }
   .viz-help { justify-content: space-between; }
   .grow-text { flex: 1; }
+  .board-filters > summary { cursor: pointer; user-select: none; }
+  .board-filters[open] > summary { margin-bottom: 8px; }
   .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; }
   .filter label { display: block; margin-bottom: 2px; }
   .filter .rc-slider { margin-top: 10px; }
