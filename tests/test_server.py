@@ -307,7 +307,7 @@ def test_served_laps_carry_the_setup_and_sectors(tmp_path, extracts):
     lap = upload(client, sign_in(client, "Alice"), extracts[3]).json()["lap_id"]
     npz = settings.data_dir / "laps" / f"{lap}.lap.npz"
     served = ProcessedLap.load(npz)
-    assert served.setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    assert served.setup["VM_BRAKE_BALANCE"]["text"] == "52.5:47.5"
     assert sector_starts([served]) == [978.0, 2586.0]
 
     # Laps stored before setups and sectors were kept get them from the extract,

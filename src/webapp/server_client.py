@@ -15,9 +15,9 @@ TIMEOUT = httpx.Timeout(10.0, read=60.0)
 # Leaderboards change rarely; don't refetch on every click.
 CACHE_SECONDS = 60
 # Downloaded laps, cached by lap id. A new suffix when served laps gain data, so
-# cached copies without it are downloaded again (v3: car setups and sectors; v2 could
-# be fetched before the server had them).
-CACHE_SUFFIX = ".v3.lap.npz"
+# cached copies without it are downloaded again (v4: car setups with each setting's
+# step, and sectors).
+CACHE_SUFFIX = ".v4.lap.npz"
 
 
 class ServerError(Exception):

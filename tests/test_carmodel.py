@@ -45,6 +45,6 @@ def test_setup_values_as_the_game_shows_them():
     meta = dict(duckdb.connect(str(ALGARVE), read_only=True)
                 .execute("SELECT * FROM metadata").fetchall())
     values = setup_values(meta["CarSetup"])
-    assert values["VM_BRAKE_BALANCE"] == "52.5:47.5"
-    assert values["WM_CAMBER-W_FL"] == "-2.20 deg"
+    assert values["VM_BRAKE_BALANCE"] == {"value": 18, "text": "52.5:47.5"}
+    assert values["WM_CAMBER-W_FL"]["text"] == "-2.20 deg"
     assert setup_values(None) is None and setup_values("{}") is None

@@ -843,7 +843,8 @@ def _setup_view(laps: list[tuple[str, ProcessedLap]]) -> list:
             "were shared don't have one.", className="muted"))
     if not have:
         return children
-    rows = compare([p.setup for _, p in have])
+    models = {p.facts.car_model or p.facts.car for _, p in have}
+    rows = compare([p.setup for _, p in have], same_model=len(models) == 1)
     names = [name for name, _ in have]
     if len(have) > 1:
         differ = [r for r in rows if r.differs]

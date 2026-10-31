@@ -56,10 +56,12 @@ def setup_is_fixed(car_setup: str | None) -> bool | None:
     return free < len(usable) / 2
 
 
-def setup_values(car_setup: str | None) -> dict[str, str] | None:
-    """Each setting the car has, as the game shows it ("52.5:47.5", "-2.20 deg"),
-    by key (``VM_BRAKE_BALANCE``, ``WM_CAMBER-W_FL``); None if there's no setup."""
-    values = {key: str(item.get("stringValue", "")).strip()
+def setup_values(car_setup: str | None) -> dict[str, dict] | None:
+    """Each setting the car has, by key (``VM_BRAKE_BALANCE``, ``WM_CAMBER-W_FL``):
+    its step on the setting's scale (``value``, the same whatever units the
+    driver uses) and how the game shows it (``text``: "52.5:47.5", "136 kPa");
+    None if there's no setup."""
+    values = {key: {"value": item.get("value"), "text": str(item.get("stringValue", "")).strip()}
               for key, item in _setup_items(car_setup).items() if item.get("available")}
     return values or None
 

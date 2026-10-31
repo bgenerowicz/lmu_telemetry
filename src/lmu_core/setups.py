@@ -1,7 +1,9 @@
 """Comparing car setups, setting by setting.
 
 Setups come from :func:`lmu_core.carmodel.setup_values`: each setting the car
-has, by its game key, as the game shows it. Car-wide settings are ``VM_*``
+has, by its game key, with its step on the setting's scale and the text the
+game shows. The text depends on the driver's units ("136 kPa", "19.7 psi"), so
+setups of the same car model are compared by step. Car-wide settings are ``VM_*``
 (``VM_REAR_WING``); per-wheel ones are ``WM_<name>-W_<corner>``
 (``WM_CAMBER-W_FL``). Rows here name them in plain words, grouped by area, and
 join the four wheels into one row (or front and rear) where they're the same.
@@ -68,40 +70,54 @@ _GROUPS = [
 class SetupRow:
     group: str
     name: str
-    # One per setup compared; None where that lap has no setup or no such setting.
+    # As the game shows it, one per setup compared; None where that lap has no
+    # setup or no such setting.
     values: tuple[str | None, ...]
-
-    @property
-    def differs(self) -> bool:
-        return len({v for v in self.values if v is not None}) > 1
+    differs: bool
 
 
-def compare(setups: list[dict[str, str] | None]) -> list[SetupRow]:
+def compare(setups: list[dict[str, dict] | None], same_model: bool = True) -> list[SetupRow]:
     """The settings of several setups side by side, grouped by area. Settings
-    none of them has or can change (N/A, fixed) are left out."""
+    none of them has or can change (N/A, fixed) are left out. Settings differ
+    by step on the same car model (whatever the units), else by text."""
     keys = list(dict.fromkeys(k for s in setups if s for k in s if not k.startswith(_SKIP)))
     car_wide = [k for k in keys if not _is_wheel(k)]
     wheels = list(dict.fromkeys(_wheel_name(k) for k in keys if _is_wheel(k)))
-    rows = []
-    for key in car_wide:
-        rows.append(SetupRow(_group(key), _name(key), _values(setups, key)))
+    parts = [(_group(key), _name(key), _settings(setups, key)) for key in car_wide]
     for name in wheels:
-        corner = {c: _values(setups, f"WM_{name}-W_{c}") for c in _CORNERS}
+        corner = {c: _settings(setups, f"WM_{name}-W_{c}") for c in _CORNERS}
         if corner["FL"] == corner["FR"] and corner["RL"] == corner["RR"]:
             if corner["FL"] == corner["RL"]:
-                parts = [("", corner["FL"])]
+                joined = [("", corner["FL"])]
             else:
-                parts = [(" front", corner["FL"]), (" rear", corner["RL"])]
+                joined = [(" front", corner["FL"]), (" rear", corner["RL"])]
         else:
-            parts = [(f" {words}", corner[c]) for c, words in _CORNERS.items()]
-        rows += [SetupRow(_group(name), _name(name) + suffix, values) for suffix, values in parts]
-    rows = [r for r in rows if any(v not in _UNSET for v in r.values if v is not None)]
+            joined = [(f" {words}", corner[c]) for c, words in _CORNERS.items()]
+        parts += [(_group(name), _name(name) + suffix, each) for suffix, each in joined]
+    rows = []
+    for group, name, each in parts:
+        texts = tuple(text for _, text in each)
+        if not any(t not in _UNSET for t in texts if t is not None):
+            continue
+        present = [(step, text) for step, text in each if text is not None]
+        by_step = same_model and all(step is not None for step, _ in present)
+        differs = len({step if by_step else text for step, text in present}) > 1
+        rows.append(SetupRow(group, name, texts, differs))
     order = [g for g, _ in _GROUPS] + ["Other"]
     return sorted(rows, key=lambda r: order.index(r.group))
 
 
-def _values(setups: list[dict[str, str] | None], key: str) -> tuple[str | None, ...]:
-    return tuple(s.get(key) if s else None for s in setups)
+def _settings(setups: list[dict | None], key: str) -> tuple[tuple[object, str | None], ...]:
+    """Each setup's (step, text) for a setting; (None, None) where it's missing.
+    A bare text (no step) is compared as text."""
+    out = []
+    for s in setups:
+        item = s.get(key) if s else None
+        if isinstance(item, dict):
+            out.append((item.get("value"), item.get("text")))
+        else:
+            out.append((None, item))
+    return tuple(out)
 
 
 def _is_wheel(key: str) -> bool:

@@ -86,7 +86,7 @@ def test_traces_include_rpm():
 def test_saved_laps_keep_their_setup(tmp_path):
     info = scan_folder(SAMPLES)[0][0]
     lap = load_lap(info.path, info.best_lap.number)
-    assert lap.setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    assert lap.setup["VM_BRAKE_BALANCE"]["text"] == "52.5:47.5"
     path = save_reference(lap, tmp_path)
     from lmu_core.library import load_reference
     assert load_reference(path).setup == lap.setup

@@ -48,9 +48,9 @@ _EARTH_M_PER_DEG = 111_320.0
 class ProcessedLap:
     facts: LapFacts
     data: dict[str, np.ndarray]
-    # The car's settings as the game shows them (lmu_core.carmodel.setup_values);
-    # None for laps saved before setups were kept.
-    setup: dict[str, str] | None = None
+    # The car's settings (lmu_core.carmodel.setup_values); None for laps saved
+    # before setups were kept.
+    setup: dict[str, dict] | None = None
 
     @property
     def distance_m(self) -> np.ndarray:
