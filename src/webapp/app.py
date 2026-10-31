@@ -162,17 +162,14 @@ def create_app(
                            className="btn"),
                     html.Button("Sign out", id="sign-out", className="btn"),
                 ]),
-                # Laps from the telemetry folder that would make the leaderboard.
+                # Laps from the telemetry folder that would make the leaderboard;
+                # signed in, pick which to upload.
                 dcc.Loading(html.Div(id="candidates", className="mt"), type="dot"),
-                html.Div(id="candidate-actions", className="row mt wrap", children=[
-                    html.Button("Upload these laps", id="upload-candidates",
-                                className="btn primary"),
-                    dcc.Checklist(
-                        id="auto-upload", className="muted",
-                        options=[{"label": " Upload them automatically while signed in",
-                                  "value": "on"}],
-                        value=["on"] if settings.get("auto_upload", True) else [],
-                    ),
+                html.Div(id="candidate-actions", className="mt", children=[
+                    dcc.Checklist(id="candidate-pick", className="candidate-pick",
+                                  options=[], value=[]),
+                    html.Button("Upload selected laps", id="upload-candidates",
+                                className="btn primary mt"),
                 ]),
                 dcc.Loading(html.Div(id="candidate-status", className="mt"), type="dot"),
                 # Anyone can see the leaderboard; signing in is only for uploading.
@@ -611,43 +608,57 @@ def create_app(
     # Laps the server has answered for this session (accepted or not): not retried,
     # so a turned-down lap can't be uploaded over and over.
     tried: set[str] = set()
+    # Laps offered for upload so far, to tell new ones from ones you unticked.
+    listed: set[str] = set()
 
     @app.callback(
         Output("candidates", "children"), Output("candidate-actions", "style"),
+        Output("candidate-pick", "options"), Output("candidate-pick", "value"),
         Output("candidate-status", "children"),
         Output("server-version", "data", allow_duplicate=True),
         Input("recordings", "data"), Input("server-version", "data"),
-        Input("upload-candidates", "n_clicks"), State("auto-upload", "value"),
+        Input("upload-candidates", "n_clicks"), State("candidate-pick", "value"),
         prevent_initial_call="initial_duplicate",
     )
-    def candidates(recordings, version, _, auto):
-        """Find laps that would make the leaderboard and, when signed in, upload them
-        (automatically, or on the button). One callback, as a separate upload callback
+    def candidates(recordings, version, _, picked):
+        """List the laps that would make the leaderboard; signed in, upload the
+        picked ones on the button. One callback, as a separate upload callback
         feeding server-version back in would be a loop Dash won't run."""
         hide = {"display": "none"}
         if not server() or not recordings:
-            return None, hide, no_update, no_update
+            return None, hide, [], [], no_update, no_update
         try:
             ruleset = Ruleset.model_validate(server().ruleset())
             found = _find(recordings, ruleset)
         except (ServerError, ValueError) as exc:
             return (html.Span(f"Couldn't check your laps against the leaderboard: {exc}",
-                              className="muted"), hide, no_update, no_update)
+                              className="muted"), hide, [], [], no_update, no_update)
         signed_in = bool(settings.get("server_token"))
         status, new_version = no_update, no_update
-        if found and signed_in and (ctx.triggered_id == "upload-candidates" or auto):
-            status, accepted = _upload(found)
-            if accepted:
-                new_version = version + 1
-            found = _find(recordings, ruleset)
+        if signed_in and ctx.triggered_id == "upload-candidates":
+            chosen = [c for c in found if c.key in (picked or [])]
+            if not chosen:
+                status = html.Span("Pick the laps to upload first.", className="muted")
+            else:
+                status, accepted = _upload(chosen)
+                if accepted:
+                    new_version = version + 1
+                found = _find(recordings, ruleset)
         if not found:
-            return None, hide, status, new_version
+            return None, hide, [], [], status, new_version
         place = " for its car" if _per_car(ruleset) else ""
-        items = [html.Li(f"{_candidate_label(c)}: would be #{c.rank}{place}") for c in found]
-        intro = "Your laps that would make the leaderboard" + (
-            ":" if signed_in else " (sign in with Steam to add them):")
-        return (html.Div([html.B(intro), html.Ul(items)]), {} if signed_in else hide,
-                status, new_version)
+        labels = {c.key: f"{_candidate_label(c)}: would be #{c.rank}{place}" for c in found}
+        if not signed_in:
+            return (html.Div([html.B("Your laps that would make the leaderboard (sign in "
+                                     "with Steam to add them):"),
+                              html.Ul([html.Li(label) for label in labels.values()])]),
+                    hide, [], [], status, new_version)
+        # New laps start ticked; ones you unticked stay unticked.
+        keep = [k for k in labels if k in (picked or []) or k not in listed]
+        listed.update(labels)
+        return (html.B("Your laps that would make the leaderboard:"), {},
+                [{"label": f" {label}", "value": key} for key, label in labels.items()],
+                keep, status, new_version)
 
     def _find(recordings, ruleset):
         per_car = _per_car(ruleset)
@@ -673,12 +684,6 @@ def create_app(
             accepted |= bool(r.get("accepted"))
             results.append(html.Li(f"{label}: {r.get('message') or r.get('reason')}"))
         return html.Div([html.B("Uploaded to the leaderboard:"), html.Ul(results)]), accepted
-
-    @app.callback(Output("auto-upload", "className"), Input("auto-upload", "value"),
-                  prevent_initial_call=True)
-    def remember_auto_upload(value):
-        remember(auto_upload=bool(value))
-        return no_update
 
     @app.callback(
         Output("server-version", "data", allow_duplicate=True),
@@ -1066,6 +1071,7 @@ _INDEX = """<!DOCTYPE html>
   }
   .viz-help { justify-content: space-between; }
   .grow-text { flex: 1; }
+  .candidate-pick label { display: block; padding: 2px 0; cursor: pointer; }
   .board-filters > summary { cursor: pointer; user-select: none; }
   .board-filters[open] > summary { margin-bottom: 8px; }
   .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; }

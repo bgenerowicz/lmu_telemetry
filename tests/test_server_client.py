@@ -148,6 +148,36 @@ def test_candidates_are_laps_that_would_make_the_leaderboard(server_url):
     assert find_candidates(recordings, ruleset, entries(bob), skip={c.key}) == []
 
 
+def test_app_lists_laps_to_upload_and_uploads_only_picked_ones(server_url, tmp_path):
+    from dash._callback_context import context_value
+    from dash._utils import AttributeDict
+
+    from webapp.app import _info_dict
+    from webapp.app import create_app as create_webapp
+    from lmu_core.library import scan_folder
+
+    ServerClient(server_url, token_for(server_url, "Alice")).upload_lap(ALGARVE, 3)
+    recordings = [_info_dict(i) for i in scan_folder(ALGARVE.parent)[0]]
+    app = create_webapp([], tmp_path / "refs", settings={
+        "server_url": server_url, "server_token": token_for(server_url, "Carol")})
+    [key] = [k for k in app.callback_map if "candidate-pick.options" in k]
+    candidates = app.callback_map[key]["callback"].__wrapped__
+
+    # Listed and ticked, nothing uploaded yet.
+    context_value.set(AttributeDict(triggered_inputs=[
+        {"prop_id": "recordings.data", "value": recordings}]))
+    _, style, options, picked, status, version = candidates(recordings, 0, None, [])
+    assert style == {} and [o["value"] for o in options] == picked == [f"{ALGARVE}|2"]
+    assert "would be #2" in options[0]["label"]
+    assert ServerClient(server_url, token_for(server_url, "Carol")).leaderboard(
+        "Algarve International Circuit", "McLaren 720S GT3")[-1]["driver"] != "Carol"
+    # Unticked, it stays unticked, and the button uploads nothing.
+    context_value.set(AttributeDict(triggered_inputs=[
+        {"prop_id": "upload-candidates.n_clicks", "value": 1}]))
+    _, _, _, picked, status, version = candidates(recordings, 0, 1, [])
+    assert picked == [] and "Pick the laps" in str(status)
+
+
 def test_errors_are_readable(server_url):
     with pytest.raises(ServerError, match="Sign in"):
         ServerClient(server_url).upload_lap(ALGARVE, 3)

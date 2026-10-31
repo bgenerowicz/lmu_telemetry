@@ -34,8 +34,8 @@ where you lose time and why, with traces and a track map.
    on the map to zoom, drag to move.
 
 **Online leaderboard**: anyone can see it; to add your laps, **Sign in with
-Steam**. The app finds your laps that would make the leaderboard and uploads
-them (automatically, or with **Upload these laps**). The server checks the
+Steam**. The app lists your laps that would make the leaderboard; tick the
+ones you want and click **Upload selected laps**. The server checks the
 lap itself (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#uploads)) and
 keeps one leaderboard per class (e.g. GT3) at each track, with each car model's top 5
 drivers, under the current [ruleset](rulesets/loose-v5.yaml), with the
