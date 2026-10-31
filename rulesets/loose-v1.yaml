@@ -1,0 +1,34 @@
+# Loose conditions, v1: the first ruleset used by the server.
+#
+# Any session, setup and fuel; dry track; valid timed laps only.
+# Rule names are LapFacts fields (src/lmu_core/lapfacts.py). See docs/RULESETS.md.
+# Never edit a ruleset once laps have been accepted under it: copy it to a new
+# file with a new id so old and new times aren't mixed.
+
+id: loose-v1
+name: Loose conditions v1
+description: >
+  Any session type, setup and fuel load. Dry track (no rain, no standing
+  water). Only timed laps that stayed within track limits.
+
+top_n: 10
+
+# Recordings don't contain the game version, so it can't be part of the key yet.
+leaderboard_key: [track, layout, car]
+
+on_unknown: warn
+
+rules:
+  rain_pct:
+    max: 0
+
+  track_wetness_pct:
+    max: 5
+
+  is_valid:
+    equals: true
+    on_unknown: reject
+
+  is_flying:
+    equals: true
+    on_unknown: reject

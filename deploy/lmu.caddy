@@ -1,0 +1,11 @@
+# Goes in ~/www/ next to the other projects' snippets. The shared Caddyfile
+# imports /srv/*.caddy inside its one site block (HOST), so this serves the
+# server at /lmu/. LMU_PUBLIC_URL in .env must match: https://HOST/lmu
+redir /lmu /lmu/
+handle_path /lmu/* {
+	request_body {
+		max_size 12MB
+	}
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
+}
