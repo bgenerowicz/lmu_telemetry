@@ -8,6 +8,8 @@ laps and a lap to compare against (from the online leaderboard, or your own),
 and it shows where you lose time and why, with traces and a track map.
 Status: early, but usable.
 
+![Comparing a lap with the leaderboard's fastest: time gap, speed, pedals, steering, line and gear by distance, next to a track map coloured by where time is lost](docs/images/comparison.png)
+
 ## Getting started (Windows)
 
 1. In LMU, turn on telemetry recording (Settings → Gameplay) and drive a
@@ -33,11 +35,18 @@ Status: early, but usable.
 4. **Compare against**: a lap from the online leaderboard, your own best lap,
    or your fastest time through each section (a theoretical best lap).
 
+![Picking a track and car, the online leaderboard for that class, your laps and the lap to compare against](docs/images/overview.png)
+
 The comparison shows traces (time gap, speed, pedals, steering, line, gear)
 next to a track map with both driving lines and the track edges. Hover the
 traces to see both cars on the map; drag across the traces, or click one of
 the "where you lose time" sections, to zoom the map to that stretch. Scroll on
 the map to zoom, drag to move.
+
+Below that, **Where you lose time** ranks the corners and straights by time
+lost, with what to change in each:
+
+![Corners ranked by time lost, each with advice such as braking later, carrying more minimum speed or getting on the throttle earlier](docs/images/losses.png)
 
 ### Online leaderboard
 
