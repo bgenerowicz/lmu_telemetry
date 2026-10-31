@@ -38,7 +38,8 @@ CHANNELS = {
     "path_lateral_m": ["Path Lateral"],
     "track_edge_m": ["Track Edge"],
 }
-EVENTS = {"gear": "Gear"}
+# The sector the car is in: 1, 2, then 0 for the last.
+EVENTS = {"gear": "Gear", "sector": "Current Sector"}
 
 _EARTH_M_PER_DEG = 111_320.0
 

@@ -1,9 +1,10 @@
-"""Plotly figures comparing one lap with a reference lap, and up to two more.
+"""Plotly figures comparing one lap with a reference lap.
 
 Two figures, linked in the browser (see ``_SYNC_JS`` in app.py):
 
 - traces against distance (time gap, speed, pedals, steering, line, rpm, gear);
-- a map with the driving lines, which pans and zooms on its own.
+- a map with both driving lines, the start/finish line and sectors, which
+  pans and zooms on its own.
 
 Map traces carry a ``meta`` tag so the browser code can find them.
 """
@@ -14,7 +15,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from lmu_core.geometry import TrackGeometry
+from lmu_core.geometry import TrackGeometry, sector_starts
 from lmu_core.resample import ProcessedLap
 from lmu_core.segments import Segment
 
@@ -34,10 +35,6 @@ ROWS = [
 # Checked with the dataviz palette validator, including colour-blind separation.
 REF_COLOR = "#52514e"
 LAP_COLOR = "#6250d6"
-# More laps to compare: two hues that stay apart from your lap's and each other
-# (validator, all pairs). A third would be blue (too close to your lap's violet)
-# or yellow (too close to time lost), so there are two.
-EXTRA_COLORS = ["#e87ba4", "#008300"]
 LOSS_COLOR = "#eb6834"
 GAIN_COLOR = "#1baf7a"
 EDGE_COLOR = "#9aa1ac"
@@ -46,14 +43,18 @@ EDGE_COLOR = "#9aa1ac"
 DELTA_SCALE = [[0.0, GAIN_COLOR], [0.5, "#e4e7ec"], [1.0, LOSS_COLOR]]
 # Window over which the map shows time gained or lost.
 MAP_WINDOW_M = 50
+# Start/finish and sector lines run across the track: past each edge by this
+# much, or this far either side of the reference path where edges weren't
+# recorded.
+LINE_OVERHANG_M = 4.0
+LINE_HALF_WIDTH_M = 10.0
 
 
 def traces_figure(
     lap: ProcessedLap, ref: ProcessedLap, segments: list[Segment], lap_name: str, ref_name: str,
-    geometry: TrackGeometry | None = None, extras: list[tuple[str, ProcessedLap]] = (),
+    geometry: TrackGeometry | None = None,
 ) -> go.Figure:
-    """All laps must be on the same distance grid (as in a SessionAnalysis); ``extras``
-    are more laps to show, by name (at most ``len(EXTRA_COLORS)``)."""
+    """Both laps must be on the same distance grid (as in a SessionAnalysis)."""
     rows = [r for r in ROWS if r[1] is None or r[1] in ref.data]
     n_rows = len(rows)
     fig = make_subplots(
@@ -62,21 +63,15 @@ def traces_figure(
         subplot_titles=[""] + [t for t, _ in rows[1:]],
     )
     d = ref.distance_m
-    # Ref first, your lap last: on top.
-    laps = [(ref_name, ref, REF_COLOR), *((n, p, c) for (n, p), c in zip(extras, EXTRA_COLORS)),
-            (lap_name, lap, LAP_COLOR)]
-    # The gap to the reference: yours alone in black, or one per lap in its colour.
-    for name, p, color in laps[1:]:
-        fig.add_trace(go.Scatter(x=d, y=p.time_s - ref.time_s, name=name, legendgroup=name,
-                                 line=dict(color=color if extras else "#222", width=1.5),
-                                 showlegend=False), 1, 1)
+    fig.add_trace(go.Scatter(x=d, y=lap.time_s - ref.time_s, name="Δt",
+                             line=dict(color="#222", width=1.5), showlegend=False), 1, 1)
     for row, (_, col) in enumerate(rows[1:], start=2):
         if col == "path_lateral_m" and geometry is not None and geometry.left_edge_m is not None:
             for edge in (geometry.left_edge_m, geometry.right_edge_m):
                 fig.add_trace(go.Scatter(x=d, y=edge, name="Track edge", hoverinfo="skip",
                                          line=dict(color=EDGE_COLOR, width=1, dash="dot"),
                                          showlegend=False), row, 1)
-        for name, p, color in laps:
+        for name, p, color in ((ref_name, ref, REF_COLOR), (lap_name, lap, LAP_COLOR)):
             if col in p.data:
                 fig.add_trace(
                     go.Scatter(x=d, y=p.data[col], name=name, legendgroup=name,
@@ -103,9 +98,8 @@ def traces_figure(
 
 def map_figure(
     geometry: TrackGeometry, lap: ProcessedLap, ref: ProcessedLap, segments: list[Segment],
-    lap_name: str, ref_name: str, extras: list[tuple[str, ProcessedLap]] = (),
+    lap_name: str, ref_name: str,
 ) -> go.Figure:
-    """Lines are tagged ``<who>-line`` and their hover markers ``<who>-pos``."""
     g = geometry
     d = g.distance_m
     fig = go.Figure()
@@ -137,21 +131,32 @@ def map_figure(
                                   ticksuffix=" s")),
         hoverinfo="skip", showlegend=False,
     ))
-    lines = [(ref_name, ref, REF_COLOR, "ref"),
-             *((n, p, c, f"extra{i}") for i, ((n, p), c) in enumerate(zip(extras, EXTRA_COLORS))),
-             (lap_name, lap, LAP_COLOR, "lap")]
-    for name, p, color, who in lines:
-        x, y = (ref_x, ref_y) if p is ref else (lap_x, lap_y) if p is lap else g.line(p)
+    for name, x, y, color, meta in ((ref_name, ref_x, ref_y, REF_COLOR, "ref-line"),
+                                    (lap_name, lap_x, lap_y, LAP_COLOR, "lap-line")):
         fig.add_trace(go.Scatter(
-            x=x, y=y, mode="lines", name=name, meta=f"{who}-line",
-            line=dict(color=color, width=2), customdata=d,
-            hovertemplate="%{customdata:.0f} m<extra>" + name + "</extra>",
+            x=x, y=y, mode="lines", name=name, meta=meta, line=dict(color=color, width=2),
+            customdata=d, hovertemplate="%{customdata:.0f} m<extra>" + name + "</extra>",
         ))
-    for _, _, color, who in lines:
+    for color, meta in ((REF_COLOR, "ref-pos"), (LAP_COLOR, "lap-pos")):
         fig.add_trace(go.Scatter(
-            x=[], y=[], mode="markers", meta=f"{who}-pos", hoverinfo="skip", showlegend=False,
+            x=[], y=[], mode="markers", meta=meta, hoverinfo="skip", showlegend=False,
             marker=dict(color=color, size=11, line=dict(color="white", width=2)),
         ))
+
+    marks = [(0.0, "Start/finish", "solid")] + [
+        (at, f"Sector {n}", "dash") for n, at in enumerate(sector_starts([lap, ref]), start=2)]
+    for at, text, dash in marks:
+        i = min(int(np.searchsorted(d, at)), len(d) - 1)
+        left, right = -LINE_HALF_WIDTH_M, LINE_HALF_WIDTH_M
+        if g.left_edge_m is not None:
+            left, right = g.left_edge_m[i] - LINE_OVERHANG_M, g.right_edge_m[i] + LINE_OVERHANG_M
+        across = np.array([left, right])
+        x, y = g.centre_x[i] + across * g.normal_x[i], g.centre_y[i] + across * g.normal_y[i]
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines", hoverinfo="skip", showlegend=False,
+                                 line=dict(color="#1d2128", width=3, dash=dash)))
+        fig.add_annotation(x=x[1], y=y[1], text=text, showarrow=True, arrowwidth=1,
+                           arrowcolor="#1d2128", ax=18, ay=-18, font=dict(size=11, color="#1d2128"),
+                           bgcolor="rgba(255,255,255,0.85)", borderpad=2)
 
     for s in segments:
         if s.kind == "corner" and s.apex_m is not None:

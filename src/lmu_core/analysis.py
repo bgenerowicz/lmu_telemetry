@@ -96,7 +96,7 @@ def analyse(laps: dict[str, ProcessedLap], reference: str | None = None) -> Sess
         raise KeyError(f"reference {reference!r} is not one of the laps")
     best = reference or min(laps, key=lambda n: laps[n].time_s[-1])
     ref = laps[best]
-    aligned = {n: on_grid(p, ref.distance_m) for n, p in laps.items()}
+    aligned = {n: _on_grid(p, ref.distance_m) for n, p in laps.items()}
     basis = [aligned[reference]] if reference else list(aligned.values())
     segments = find_segments(_median_lap(basis))
     stats = {n: [segment_stats(p, s) for s in segments] for n, p in aligned.items()}
@@ -227,7 +227,7 @@ def _speed_summary(lap: SegmentStats, ref: SegmentStats) -> str:
     )
 
 
-def on_grid(lap: ProcessedLap, grid: np.ndarray) -> ProcessedLap:
+def _on_grid(lap: ProcessedLap, grid: np.ndarray) -> ProcessedLap:
     """Put a lap on another lap's distance grid.
 
     Track length is estimated per recording, so two recordings can differ by a

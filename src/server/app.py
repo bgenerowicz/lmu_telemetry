@@ -32,10 +32,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Upl
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from lmu_core.bands import BAND_FIELDS, FUEL_LABELS, describe, track_temp_band
-from lmu_core.carmodel import setup_values
 from lmu_core.laps import lap_facts, split_laps
 from lmu_core.recording import Recording
-from lmu_core.resample import ProcessedLap
+from lmu_core.resample import ProcessedLap, resample_lap
 from lmu_core.ruleset import Ruleset
 from lmu_core.verify import verify_lap
 from server import db, steam
@@ -62,7 +61,7 @@ def create_app(
     if db.upgrade(settings.data_dir, 1):
         _hide_driver_names(settings)
     if db.upgrade(settings.data_dir, 2):
-        _add_setups(settings)
+        _reprocess_laps(settings)
     ruleset = Ruleset.load(settings.ruleset_path)
     unstored = set(ruleset.leaderboard_key + ruleset.top_n_per) - STORED_FIELDS
     if unstored:
@@ -467,19 +466,23 @@ def _hide_driver_names(settings: Settings) -> None:
         con.close()
 
 
-def _add_setups(settings: Settings) -> None:
-    """Processed laps stored before setups were kept get theirs, from the extract."""
+def _reprocess_laps(settings: Settings) -> None:
+    """Processed laps stored before setups and sectors were kept are made again
+    from their extract; their facts (as served) stay."""
+    def resampled(rec: Recording) -> ProcessedLap:
+        number = int(rec.metadata["ExtractedLap"])
+        return resample_lap(rec, next(l for l in split_laps(rec) if l.number == number))
+
     con = db.connect(settings.data_dir)
     try:
         for (lap_id,) in con.execute("SELECT id FROM laps").fetchall():
             raw, processed = db.lap_files(settings.data_dir, lap_id)
             try:
-                setup = _from_extract(raw, int(settings.max_unpacked_mb * 1e6),
-                                      lambda rec: setup_values(rec.metadata.get("CarSetup")))
-                p = ProcessedLap.load(processed)
-            except Exception:  # noqa: BLE001 - a lap that can't be read keeps no setup
+                fresh = _from_extract(raw, int(settings.max_unpacked_mb * 1e6), resampled)
+                facts = ProcessedLap.load(processed).facts
+            except Exception:  # noqa: BLE001 - a lap that can't be read stays as it is
                 continue
-            dataclasses.replace(p, setup=setup).save(processed)
+            dataclasses.replace(fresh, facts=facts).save(processed)
     finally:
         con.close()
 

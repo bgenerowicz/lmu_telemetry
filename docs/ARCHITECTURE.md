@@ -42,9 +42,7 @@ server, reading the same processed lap format.
 5. **Compare** (`compare.py`, `analysis.py`): `Δt(d) = t_lap(d) − t_ref(d)`.
    The reference is either one lap (an expert lap, whose corners then define
    the segments) or, per segment, the driver's own fastest lap through it;
-   adding those up gives the theoretical best lap. Up to two more laps can be
-   shown alongside (traces, map, section times); only the reference is
-   analysed.
+   adding those up gives the theoretical best lap.
 6. **Advise** (`analysis.py`) from per-segment metrics: braking point and
    peak pressure, entry, minimum and exit speed, full-throttle point, metres
    off throttle. Losses on a straight that come from a slower start are blamed
@@ -56,10 +54,14 @@ centre line derived once from the reference lap's GPS position. This is
 smoother than GPS (quantised to ~0.4 m) and identical across recordings; it
 matches each lap's own GPS to ~0.1 m. Track edges come from `Track Edge`
 (edge on the side the car is on), combined over the laps being compared.
+Sector lines come from the `Current Sector` event, kept per metre as
+`sector`. (`Wind Speed` and `Wind Heading` are recorded but were the same in
+every recording so far, whatever the weather, so they aren't shown; there's
+no yaw channel, so the map can't show where a car points.)
 
 `setups.py` compares setups: settings in plain words, grouped by area, with
-the four wheels joined where they're the same; the app shows the ones that
-differ from yours.
+the four wheels joined where they're the same; the app shows the ones where
+the reference differs from yours.
 
 `library.py` finds laps: it scans a telemetry folder (metadata and lap events
 only, cached per file) and loads reference laps from `.lap.npz` folders: the

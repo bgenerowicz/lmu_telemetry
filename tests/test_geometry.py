@@ -54,3 +54,17 @@ def test_no_edges_without_track_edge_channel(laps):
             for l in laps]
     g = track_geometry(bare[2], bare)
     assert g.left_edge_m is None and g.right_edge_m is None
+
+
+def test_sector_starts(laps):
+    from lmu_core.geometry import sector_starts
+    from lmu_core.resample import ProcessedLap
+
+    assert sector_starts(laps) == [978.0, 2586.0]
+    # Put on another lap's grid, the sector reads in-between values at a change.
+    from lmu_core.analysis import _on_grid
+    shifted = _on_grid(laps[0], laps[1].distance_m + 0.5)
+    assert sector_starts([shifted]) == pytest.approx([978.0, 2586.0], abs=2)
+    no_sectors = [ProcessedLap(l.facts, {k: v for k, v in l.data.items() if k != "sector"})
+                  for l in laps]
+    assert sector_starts(no_sectors) == []

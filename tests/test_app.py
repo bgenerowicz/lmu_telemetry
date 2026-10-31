@@ -60,22 +60,16 @@ def test_results_against_expert_lap(tmp_path):
 
     app = webapp.create_app([REFERENCES], tmp_path / "refs")
     results = app.callback_map["results.children"]["callback"]
-    view = results.__wrapped__([lap2], f"ref:{ref.path}", [], rows, recordings, info.track,
-                               info.car)
+    view = results.__wrapped__([lap2], f"ref:{ref.path}", rows, recordings, info.track, info.car)
     text = str(view)
     assert "Where you lose time" in text
     assert "+0.816 s" in text
     # The same recording: the same setup.
     assert "The setups are the same." in text
-
-    # Lap 1 shown alongside: on the traces and map, in the cards and sections.
-    view = results.__wrapped__([lap2], f"ref:{ref.path}", [f"mine:{info.path}|1"], rows,
-                               recordings, info.track, info.car)
-    text = str(view)
-    assert "Also shown" in text and "Your lap 1 (" in text
+    # The map marks the start/finish line and where sectors 2 and 3 start.
     [viz] = [c for c in view.children if getattr(c, "id", None) == "viz"]
-    names = {t.name for t in viz.children[0].children.figure.data}
-    assert {"Your lap 2 (" + rows[lap2]["time"] + ")", "Your lap 1 (1:54.425)"} <= names
+    marks = [a.text for a in viz.children[1].children.figure.layout.annotations]
+    assert {"Start/finish", "Sector 2", "Sector 3"} <= set(marks)
 
 
 def test_traces_include_rpm():

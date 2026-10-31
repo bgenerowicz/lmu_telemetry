@@ -297,22 +297,31 @@ def test_fuel_filter_takes_known_bands_only(tmp_path):
     assert client.get("/api/leaderboard", params={**params, "fuel": ["x"] * 5000}).status_code == 422
 
 
-def test_served_laps_carry_the_setup(tmp_path, extracts):
+def test_served_laps_carry_the_setup_and_sectors(tmp_path, extracts):
     import dataclasses
     import sqlite3
+
+    from lmu_core.geometry import sector_starts
 
     client, settings = make_client(tmp_path)
     lap = upload(client, sign_in(client, "Alice"), extracts[3]).json()["lap_id"]
     npz = settings.data_dir / "laps" / f"{lap}.lap.npz"
-    assert ProcessedLap.load(npz).setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    served = ProcessedLap.load(npz)
+    assert served.setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    assert sector_starts([served]) == [978.0, 2586.0]
 
-    # Laps stored before setups were kept get theirs from the extract, once.
-    dataclasses.replace(ProcessedLap.load(npz), setup=None).save(npz)
+    # Laps stored before setups and sectors were kept get them from the extract,
+    # once, keeping the served facts.
+    old = dataclasses.replace(served, setup=None, data={
+        k: v for k, v in served.data.items() if k != "sector"})
+    old.save(npz)
     con = sqlite3.connect(settings.data_dir / "lmu.sqlite3")
     con.execute("PRAGMA user_version = 1")
     con.close()
     make_client(tmp_path)
-    assert ProcessedLap.load(npz).setup["VM_BRAKE_BALANCE"] == "52.5:47.5"
+    again = ProcessedLap.load(npz)
+    assert again.setup == served.setup and "sector" in again.data
+    assert again.facts.driver == "Alice"
 
 
 def test_upload_limits(tmp_path, extracts):

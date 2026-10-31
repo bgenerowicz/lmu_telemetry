@@ -25,6 +25,8 @@ from lmu_core.resample import ProcessedLap
 
 # Track Edge reads ~30 m in the pit lane; real edges are well inside this.
 MAX_EDGE_M = 20.0
+# Sector changes this close to the line are the lap starting, not a sector.
+SECTOR_LINE_M = 50.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,23 @@ def track_geometry(ref: ProcessedLap, laps: list[ProcessedLap]) -> TrackGeometry
 
     left, right = _edges(laps)
     return TrackGeometry(ref.distance_m, cx, cy, nx, ny, left, right)
+
+
+def sector_starts(laps: list[ProcessedLap]) -> list[float]:
+    """Where sectors 2, 3, ... start (m), from the first lap that recorded its
+    sector; empty if none did (laps saved before sectors were kept)."""
+    for p in laps:
+        if "sector" in p.data:
+            d, sector = p.distance_m, p.data["sector"]
+            starts = []
+            # A lap put on another lap's grid has in-between values at a change,
+            # so changes a few metres apart are one.
+            for i in np.flatnonzero(np.diff(sector) != 0) + 1:
+                if SECTOR_LINE_M < d[i] < d[-1] - SECTOR_LINE_M and (
+                        not starts or d[i] - starts[-1] > SECTOR_LINE_M):
+                    starts.append(float(d[i]))
+            return starts
+    return []
 
 
 def _edges(laps: list[ProcessedLap]) -> tuple[np.ndarray | None, np.ndarray | None]:
