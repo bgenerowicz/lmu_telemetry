@@ -101,3 +101,13 @@ def test_steering_given_as_a_fraction_is_read_as_percent(rec, monkeypatch):
     monkeypatch.setitem(rec.channels, name, (freq, ""))
     monkeypatch.setattr(rec, "channel", old_channel)
     np.testing.assert_allclose(resample_lap(rec, lap).data["steering_pct"], expected)
+
+
+def test_laps_saved_with_steering_as_a_fraction_load_as_percent(rec, tmp_path):
+    processed = resample_lap(rec, split_laps(rec)[3])
+    expected = processed.data["steering_pct"]
+    old = ProcessedLap(processed.facts, {**processed.data, "steering_pct": expected / 100},
+                       processed.setup)
+    old.save(tmp_path / "old.lap.npz")
+    np.testing.assert_allclose(ProcessedLap.load(tmp_path / "old.lap.npz").data["steering_pct"],
+                               expected)

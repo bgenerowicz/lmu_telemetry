@@ -73,7 +73,13 @@ class ProcessedLap:
         with np.load(path, allow_pickle=False) as z:
             facts = LapFacts(**json.loads(str(z["_facts"])))
             setup = json.loads(str(z["_setup"])) if "_setup" in z.files else None
-            return cls(facts, {k: z[k] for k in z.files if not k.startswith("_")}, setup)
+            data = {k: z[k] for k in z.files if not k.startswith("_")}
+        steering = data.get("steering_pct")
+        if steering is not None and np.abs(steering).max() <= 1:
+            # Saved from a recording that gave steering as a fraction (see
+            # resample_lap); no lap steers less than 1% all the way round.
+            data["steering_pct"] = steering * 100
+        return cls(facts, data, setup)
 
 
 def track_length(rec: Recording) -> float:
