@@ -411,8 +411,8 @@ def test_laps_are_kept_and_filtered_per_band(tmp_path, extracts):
     track = "Algarve International Circuit"
     # The sample: open setup, track ~21° (the 20-25° band), ~77 L fuel.
     r = upload(client, alice, extracts[3]).json()
-    assert r["message"] == (f"Accepted: #1 on {track} in the McLaren 720S GT3 (open setup, "
-                            "track 20–25°, 60+ L fuel) (#1 overall in GT3).")
+    assert r["message"] == (f"Accepted: #1 on {track} in the McLaren 720S GT3, open setup, "
+                            "track 20–25°, 60+ L fuel (#1 overall in GT3).")
     # A slower lap of Alice's on a hotter track is her best there, so it's kept too.
     r = upload(client, alice, hotter(extracts[2], 10)).json()
     assert r["accepted"] and "track 30–35°" in r["message"]

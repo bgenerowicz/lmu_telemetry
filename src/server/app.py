@@ -342,7 +342,7 @@ def _process_upload(settings: Settings, ruleset: Ruleset, con: sqlite3.Connectio
     car_name = f.car if "car" in ruleset.top_n_per else (f.car_model or f.car)
     within = f" in the {car_name}" if {"car", "car_model"} & set(ruleset.top_n_per) else ""
     if set(BAND_FIELDS) & set(ruleset.top_n_per):
-        within += f" ({describe(f.setup_fixed, f.track_temp_band, f.fuel_band)})"
+        within += f", {describe(f.setup_fixed, f.track_temp_band, f.fuel_band)}"
     con.execute("BEGIN IMMEDIATE")
     try:
         own = con.execute(f"SELECT id, lap_time_s FROM laps WHERE {board} AND user_id = ?",
