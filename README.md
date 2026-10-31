@@ -3,7 +3,7 @@
 Compare your Le Mans Ultimate laps against fast reference laps, and see
 corner by corner (and straight by straight) where you lose time and why.
 
-Status: early. **LMU Lap Analyser** is a local app: pick a track and car,
+Status: early, but usable. **LMU Lap Analyser** is a local app: pick a track and car,
 point it at your telemetry folder, choose one of your laps and a lap
 to compare against (from the online leaderboard, or your own), and it shows corner by corner (and straight by straight)
 where you lose time and why, with traces and a track map.
@@ -11,9 +11,8 @@ where you lose time and why, with traces and a track map.
 ## LMU Lap Analyser (Windows)
 
 1. Download [`lmu-analyser.exe`](https://github.com/bgenerowicz/lmu_telemetry/releases/latest/download/lmu-analyser.exe)
-   from the [latest release](https://github.com/bgenerowicz/lmu_telemetry/releases/latest)
-   (while the repo is private, you need to be signed in to GitHub). Every push
-   to the default branch rebuilds it.
+   from the [latest release](https://github.com/bgenerowicz/lmu_telemetry/releases/latest).
+   Every push to the default branch rebuilds it.
 2. In LMU, turn on telemetry recording (Settings → Gameplay) and drive a
    session with a few timed laps.
 3. Run `lmu-analyser.exe`. A console window opens (keep it open; close it to
@@ -80,12 +79,17 @@ LMU_SERVER_URL=http://127.0.0.1:8000 LMU_DEV_LOGIN_NAME=Alice python -m desktop
 ## How it fits together
 
 1. **Drive.** LMU records telemetry to `UserData\Telemetry\*.duckdb`.
-2. **Upload.** A small watcher on your PC splits recordings into laps, checks
-   them against the shared [ruleset](docs/RULESETS.md) ("standard conditions"),
-   and uploads laps that would make the top N for their track and car.
-3. **Review.** A web app compares your lap with a reference from the
-   leaderboard: time lost per corner and straight, with advice, charts, a
-   track map and a 2D ghost.
+2. **Upload.** The app splits recordings into laps, checks them against the
+   shared [ruleset](docs/RULESETS.md) ("standard conditions"), and lists the
+   laps that would make the leaderboard for you to upload. The server checks
+   each lap again.
+3. **Review.** The app compares your lap with a reference from the
+   leaderboard: time lost per corner and straight, with advice, traces and a
+   track map.
+
+The server can only check that an uploaded lap looks genuine (it stays on
+track, meets the ruleset); the telemetry comes from the player's own PC, so
+the leaderboard relies on moderation (see [deploy/README.md](deploy/README.md#moderation)).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
@@ -100,7 +104,6 @@ src/server/     leaderboard server (Steam sign-in, verified uploads)
 deploy/         Docker, Caddy and .env files for the server
 references/     expert reference laps shipped with the app (.lap.npz)
 packaging/      PyInstaller entry point and exe smoke test
-src/uploader/   folder watcher + upload           (not started)
 rulesets/       standard-conditions rulesets (YAML)
 samples/        raw LMU recordings for development
 docs/           architecture and format docs
@@ -121,6 +124,11 @@ python -m venv .venv
 .venv/bin/pytest
 ```
 
+## Contributing
+
+Issues and pull requests are welcome. Run the tests before sending a change;
+most of them need the sample recording in [`samples/`](samples/).
+
 ## License
 
-MIT
+[MIT](LICENSE). Not affiliated with Le Mans Ultimate or its developers.

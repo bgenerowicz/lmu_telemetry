@@ -1,4 +1,4 @@
-"""Core analysis shared by the uploader, server and web app.
+"""Core analysis shared by the app and the server.
 
 Pipeline: read DuckDB recording -> split into laps -> resample by distance ->
 segment into corners/straights -> compare against a reference -> advice.

@@ -3,17 +3,17 @@
 ## Components
 
 ```
- Gaming PC (Windows)                      Server                      Browser
-┌──────────────────────┐   processed   ┌──────────────────┐         ┌─────────────┐
-│ LMU → *.duckdb       │     laps      │ FastAPI          │  HTTP   │ Dash web app│
-│ uploader (watcher)   │ ────────────▶ │ leaderboards     │ ◀─────▶ │             │
-│  lmu_core            │               │ lap store        │         │             │
-└──────────────────────┘               │  lmu_core        │         └─────────────┘
-                                       └──────────────────┘
+ Gaming PC (Windows)                        Server
+┌────────────────────────────┐  lap uploads ┌──────────────────┐
+│ LMU → *.duckdb             │ ───────────▶ │ FastAPI          │
+│ LMU Lap Analyser (Dash app │              │ leaderboards     │
+│  in the browser)           │ ◀─────────── │ lap store        │
+│  lmu_core                  │  leaderboard │  lmu_core        │
+└────────────────────────────┘  and laps    └──────────────────┘
 ```
 
-All three use `lmu_core`, so the reader, ruleset checks and analysis are the
-same everywhere. A Godot ghost viewer could later be another client of the
+Both use `lmu_core`, so the reader, ruleset checks and analysis are the same
+on the PC and on the server. A Godot ghost viewer could later be another client of the
 server, reading the same processed lap format.
 
 ## lmu_core pipeline

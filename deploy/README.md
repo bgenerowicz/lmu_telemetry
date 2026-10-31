@@ -1,33 +1,37 @@
 # Deploying the leaderboard server
 
-The server runs as one container (`lmu-server`) on the VPS
-(`vps-534a6b72.vps.ovh.net`), behind the Caddy container that is already
-there (`substorm-https`, from the Substorm project), which provides HTTPS.
-It is served at `https://vps-534a6b72.vps.ovh.net/lmu/`. Data (SQLite
-database and lap files) lives in `deploy/data/` on the host.
+The server runs as one container (`lmu-server`) behind a reverse proxy that
+provides HTTPS. Data (SQLite database and lap files) lives in `deploy/data/`
+on the host.
 
-How the VPS's Caddy is set up (it belongs to Substorm, so don't change it
-from here):
+Below, `HOST` is the server's public hostname and `SSH` the SSH login for it
+(e.g. `debian@HOST`). The public server's address is the app's default,
+`DEFAULT_SERVER_URL` in [`src/desktop/paths.py`](../src/desktop/paths.py).
+
+The setup here assumes a Caddy container that already serves other projects
+on `HOST`:
 - It runs in host network mode, so it reaches `lmu-server` on
   `127.0.0.1:8000` (published on loopback only).
-- Its Caddyfile has one site block for the VPS hostname, which imports
-  `/srv/*.caddy` (`/home/debian/www/*.caddy` on the host). Each project adds
-  a path there (`/kakariko/`, `/play/`, and `/lmu/` for this one). A
-  separate hostname would need a change to Substorm's Caddyfile.
+- Its Caddyfile has one site block for `HOST`, which imports `/srv/*.caddy`
+  (`~/www/*.caddy` on the host). Each project adds a path there; this one is
+  `/lmu/`. A separate hostname would need a change to that Caddyfile.
+
+With any other proxy, forward `https://HOST/lmu/` to `127.0.0.1:8000` with the
+`/lmu` prefix stripped (see [`lmu.caddy`](lmu.caddy)), allowing request bodies
+up to 12 MB.
 
 ## One-time setup
 
-1. The repository is private and the VPS has no access to GitHub, so copy
-   the code from a checkout of `main` (`core.autocrlf=false` keeps Windows
-   line endings out):
+1. Copy the code from a checkout of `main` (`core.autocrlf=false` keeps
+   Windows line endings out; cloning on the server works too):
    ```bash
-   git -c core.autocrlf=false archive main | ssh debian@vps-534a6b72.vps.ovh.net 'mkdir -p ~/lmu-telemetry && tar -x -C ~/lmu-telemetry'
+   git -c core.autocrlf=false archive main | ssh SSH 'mkdir -p ~/lmu-telemetry && tar -x -C ~/lmu-telemetry'
    ```
-   Then on the VPS:
+   Then on the server:
    ```bash
    cd ~/lmu-telemetry/deploy
-   cp .env.example .env    # then edit: STEAM_API_KEY (optional)
-   mkdir -p data           # the container runs as 1000:1000, which is debian
+   cp .env.example .env    # then edit: LMU_PUBLIC_URL, STEAM_API_KEY (optional)
+   mkdir -p data           # the container runs as 1000:1000
    ```
 2. Start the server:
    ```bash
@@ -35,12 +39,12 @@ from here):
    curl -s http://127.0.0.1:8000/api/health
    ```
 3. Add the site to Caddy, validate, then reload (Caddy also serves other
-   projects, so validate first):
+   projects, so validate first; `CADDY` is its container's name):
    ```bash
-   cp lmu.caddy /home/debian/www/lmu.caddy
-   docker exec substorm-https caddy validate --config /etc/caddy/Caddyfile
-   docker exec substorm-https caddy reload --config /etc/caddy/Caddyfile
-   curl -s https://vps-534a6b72.vps.ovh.net/lmu/api/health
+   cp lmu.caddy ~/www/lmu.caddy
+   docker exec CADDY caddy validate --config /etc/caddy/Caddyfile
+   docker exec CADDY caddy reload --config /etc/caddy/Caddyfile
+   curl -s https://HOST/lmu/api/health
    ```
 
 ## Updating
@@ -48,11 +52,13 @@ from here):
 From the checkout of `main`, copy the code over again and rebuild (this
 keeps `deploy/.env` and `deploy/data/`):
 ```bash
-git -c core.autocrlf=false archive main | ssh debian@vps-534a6b72.vps.ovh.net 'tar -x -C ~/lmu-telemetry'
-ssh debian@vps-534a6b72.vps.ovh.net 'cd ~/lmu-telemetry/deploy && docker compose up -d --build'
+git -c core.autocrlf=false archive main | ssh SSH 'tar -x -C ~/lmu-telemetry'
+```
+```bash
+ssh SSH 'cd ~/lmu-telemetry/deploy && docker compose up -d --build'
 ```
 
-Files deleted from the repository stay on the VPS until removed by hand. If
+Files deleted from the repository stay on the server until removed by hand. If
 `lmu.caddy` changed, copy it again and validate/reload as above.
 
 ## Moderation

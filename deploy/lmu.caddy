@@ -1,7 +1,6 @@
-# Goes in /home/debian/www/ next to the other projects' snippets. The VPS's
-# shared Caddyfile imports /srv/*.caddy inside its one site block
-# (vps-534a6b72.vps.ovh.net), so this serves the server at /lmu/.
-# LMU_PUBLIC_URL in .env must match: https://vps-534a6b72.vps.ovh.net/lmu
+# Goes in ~/www/ next to the other projects' snippets. The shared Caddyfile
+# imports /srv/*.caddy inside its one site block (HOST), so this serves the
+# server at /lmu/. LMU_PUBLIC_URL in .env must match: https://HOST/lmu
 redir /lmu /lmu/
 handle_path /lmu/* {
 	request_body {

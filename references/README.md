@@ -7,9 +7,10 @@ as track, car, driver and lap time).
 None yet: laps to compare against come from the online leaderboard. Only
 genuinely fast laps belong here.
 
-To add one: in the app, select a lap and click **Save as expert lap**. It is
-saved to `Documents\LMU Lap Analyser\references`; copy the file here and commit
-it to ship it with the app.
+To add one: laps you compare against from the leaderboard are downloaded to
+`Documents\LMU Lap Analyser\cache`; copy one here (or to
+`Documents\LMU Lap Analyser\references` to use it yourself) and commit it to
+ship it with the app.
 
 | File | Track | Car | Driver | Time |
 |------|-------|-----|--------|------|
