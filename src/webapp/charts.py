@@ -4,8 +4,8 @@ Two figures, linked in the browser (see ``_SYNC_JS`` in app.py):
 
 - traces against distance (time gap, speed, pedals, steering, line, rpm, gear);
 - a map with both driving lines, the start/finish line and sectors, which
-  pans and zooms on its own. Hovering the traces puts both cars on it, as
-  arrows pointing where their front wheels point.
+  pans and zooms on its own. Hovering the traces puts both cars on it, with
+  arrows to where their front wheels point.
 
 Map traces carry a ``meta`` tag so the browser code can find them.
 """
@@ -50,6 +50,8 @@ MAP_WINDOW_M = 50
 # recorded.
 LINE_OVERHANG_M = 4.0
 LINE_HALF_WIDTH_M = 10.0
+# Length of the arrow out of each car on the map, to where its front wheels point.
+WHEEL_ARROW_PX = 40
 
 
 def traces_figure(
@@ -156,18 +158,19 @@ def map_figure(
             customdata=d, hovertemplate="%{customdata:.0f} m<extra>" + name + "</extra>",
         ))
     # Where each car is while hovering the traces (moved by _SYNC_JS in app.py):
-    # an arrow turned to where its front wheels point (angles per metre in
-    # customdata), or a dot for a lap without a setup to tell the steering lock.
+    # a dot, and an arrow out of it to where its front wheels point (angles per
+    # metre in customdata; none for a lap without a setup to tell the steering
+    # lock). The arrow is an annotation so its length is in pixels, whatever the zoom.
     for p, x, y, color, meta in ((ref, ref_x, ref_y, REF_COLOR, "ref-pos"),
                                  (lap, lap_x, lap_y, LAP_COLOR, "lap-pos")):
-        angles = front_wheel_angles(p, x, y)
         fig.add_trace(go.Scatter(
             x=[], y=[], mode="markers", meta=meta, hoverinfo="skip", showlegend=False,
-            customdata=angles,
-            marker=dict(color=color, size=11 if angles is None else 20,
-                        symbol="circle" if angles is None else "arrow",
-                        line=dict(color="white", width=2)),
+            customdata=front_wheel_angles(p, x, y),
+            marker=dict(color=color, size=11, line=dict(color="white", width=2)),
         ))
+        fig.add_annotation(name=meta, x=0, y=0, text="", visible=False, showarrow=True,
+                           arrowside="start", arrowhead=2, arrowsize=1, arrowwidth=2.5,
+                           arrowcolor=color, ax=0, ay=-WHEEL_ARROW_PX)
 
     marks = [(0.0, "Start/finish", "solid")] + [
         (at, f"Sector {n}", "dash") for n, at in enumerate(sector_starts([lap, ref]), start=2)]

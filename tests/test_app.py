@@ -72,6 +72,10 @@ def test_results_against_expert_lap(tmp_path):
     [viz] = [c for c in view.children if getattr(c, "id", None) == "viz"]
     marks = [a.text for a in viz.children[1].children.figure.layout.annotations]
     assert {"Start/finish", "Sector 2", "Sector 3"} <= set(marks)
+    # An arrow for each car, shown (and turned) while hovering the traces.
+    arrows = [a for a in viz.children[1].children.figure.layout.annotations if a.name]
+    assert [(a.name, a.visible, a.arrowside) for a in arrows] == [
+        ("ref-pos", False, "start"), ("lap-pos", False, "start")]
 
 
 def test_traces_include_rpm():

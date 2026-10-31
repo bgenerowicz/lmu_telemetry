@@ -763,7 +763,7 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         html.Div(className="row mt viz-help", children=[
             html.Span("On the map, scroll to zoom and drag to move. Drag across the traces to "
                       "zoom in; the map follows. Click a section below to jump to it. Hover "
-                      "the traces to see both cars on the map, pointing where their front "
+                      "the traces to see both cars on the map, with arrows to where their front "
                       "wheels point: more angle than the reference on the same line means "
                       "the front is sliding.",
                       className="muted grow-text"),
@@ -1023,17 +1023,25 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (functi
     onHover(hover) {
       const gd = plot('map');
       if (!gd || !hover || !hover.points || !hover.points.length) return none();
-      const d = hover.points[0].x, update = {x: [], y: [], 'marker.angle': []}, idx = [];
+      const d = hover.points[0].x, update = {x: [], y: []}, idx = [], arrows = {};
+      const notes = gd.layout.annotations || [];
       for (const [line, pos] of [['ref-line', 'ref-pos'], ['lap-line', 'lap-pos']]) {
         const li = find(gd, line), pi = find(gd, pos);
         if (li < 0 || pi < 0) continue;
         const t = gd._fullData[li], k = at(t.x, d);
-        // The front wheels' direction at this metre, for the arrow (charts.py).
-        const wheels = gd.data[pi].customdata;
-        update.x.push([t.x[k]]); update.y.push([t.y[k]]);
-        update['marker.angle'].push(wheels ? wheels[k] : 0); idx.push(pi);
+        update.x.push([t.x[k]]); update.y.push([t.y[k]]); idx.push(pi);
+        // The arrow out of the dot to where the front wheels point at this
+        // metre: degrees clockwise from up (charts.py); pixels, y down.
+        const a = notes.findIndex(n => n.name === pos), wheels = gd.data[pi].customdata;
+        if (a < 0 || !wheels) continue;
+        // Turned, keeping the length charts.py gave it.
+        const r = wheels[k] * Math.PI / 180, len = Math.hypot(notes[a].ax, notes[a].ay);
+        Object.assign(arrows, {[`annotations[${a}].x`]: t.x[k], [`annotations[${a}].y`]: t.y[k],
+          [`annotations[${a}].ax`]: len * Math.sin(r), [`annotations[${a}].ay`]: -len * Math.cos(r),
+          [`annotations[${a}].visible`]: true});
       }
       if (idx.length) Plotly.restyle(gd, update, idx);
+      if (Object.keys(arrows).length) Plotly.relayout(gd, arrows);
       return none();
     },
     // Zooming the traces to a distance range zooms the map to the same stretch.
