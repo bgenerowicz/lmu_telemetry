@@ -434,6 +434,29 @@ def test_same_lap_can_enter_a_new_ruleset(tmp_path, extracts):
     assert upload(v2, alice, extracts[3]).status_code == 409
 
 
+def test_admin_lists_and_prunes_laps_of_older_rulesets(tmp_path, extracts, monkeypatch, capsys):
+    from server import admin
+
+    v1, settings = make_client(tmp_path, ruleset="loose-v1.yaml")
+    old = upload(v1, sign_in(v1, "Alice"), extracts[3]).json()["lap_id"]
+    v2, settings = make_client(tmp_path, ruleset="loose-v2.yaml")
+    new = upload(v2, sign_in(v2, "Alice"), extracts[3]).json()["lap_id"]
+    monkeypatch.setenv("LMU_DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("LMU_RULESET", str(settings.ruleset_path))
+    capsys.readouterr()
+    assert admin.main(["laps"]) == 0
+    listed = capsys.readouterr().out
+    assert new in listed and old not in listed
+    assert admin.main(["laps", "--all"]) == 0
+    assert "[loose-v1]" in capsys.readouterr().out
+    assert admin.main(["prune-laps"]) == 0
+    assert admin.main(["laps", "--all"]) == 0
+    listed = capsys.readouterr().out
+    assert new in listed and old not in listed
+    assert not (settings.data_dir / "laps" / f"{old}.lap.npz").exists()
+    assert (settings.data_dir / "laps" / f"{new}.lap.npz").exists()
+
+
 def test_leaderboard_marks_your_own_laps(tmp_path, extracts):
     client, _ = make_client(tmp_path)
     alice, bob = sign_in(client, "Alice"), sign_in(client, "Bob")

@@ -63,10 +63,15 @@ Files deleted from the repository stay on the server until removed by hand. If
 
 ## Moderation
 
+`laps` lists the current ruleset's laps (`--all` also those kept from older
+rulesets, which `prune-laps` deletes, e.g. after a ruleset change once laps have
+been uploaded again).
+
 ```bash
 docker compose exec lmu-server python -m server.admin users
 docker compose exec lmu-server python -m server.admin laps --track "Algarve International Circuit"
 docker compose exec lmu-server python -m server.admin delete-lap LAP_ID
+docker compose exec lmu-server python -m server.admin prune-laps
 docker compose exec lmu-server python -m server.admin ban STEAM_ID
 ```
 

@@ -1,8 +1,9 @@
 """Moderation from the server's command line.
 
     python -m server.admin users
-    python -m server.admin laps [--track NAME]
+    python -m server.admin laps [--track NAME] [--all]
     python -m server.admin delete-lap LAP_ID
+    python -m server.admin prune-laps          (laps of older rulesets)
     python -m server.admin ban STEAM_ID        (also deletes their laps)
     python -m server.admin unban STEAM_ID
     python -m server.admin make-admin STEAM_ID
@@ -10,6 +11,10 @@
     python -m server.admin refresh-names      (Steam display names, for all users)
 
 In Docker: docker compose exec lmu-server python -m server.admin users
+
+``laps`` lists the current ruleset's laps, the ones on the leaderboard; ``--all``
+also lists laps kept from older rulesets (each with its ruleset), which
+``prune-laps`` deletes.
 
 import-lap adds lap extracts (``lmu_core.extract``) for a driver who hasn't
 signed in, e.g. telemetry they sent: each goes through the same checks as an
@@ -37,8 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("users")
     sub.add_parser("refresh-names")
+    sub.add_parser("prune-laps")
     laps = sub.add_parser("laps")
     laps.add_argument("--track")
+    laps.add_argument("--all", action="store_true", help="also laps of older rulesets")
     for name in ("delete-lap", "ban", "unban", "make-admin"):
         sub.add_parser(name).add_argument("target")
     imp = sub.add_parser("import-lap")
@@ -55,12 +62,23 @@ def main(argv: list[str] | None = None) -> int:
                 flags = " ".join(f for f, on in (("admin", u["is_admin"]), ("BANNED", u["banned"])) if on)
                 print(f"{u['steam_id']}  {u['name']}  {flags}")
         elif args.command == "laps":
+            current = None if args.all else Ruleset.load(settings.ruleset_path).id
             for lap in con.execute(
                 "SELECT laps.*, users.name FROM laps JOIN users ON users.id = laps.user_id "
-                "WHERE ? IS NULL OR track = ? ORDER BY track, car, lap_time_s",
-                (args.track, args.track),
+                "WHERE (? IS NULL OR track = ?) AND (? IS NULL OR ruleset_id = ?) "
+                "ORDER BY ruleset_id, track, car, lap_time_s",
+                (args.track, args.track, current, current),
             ):
-                print(f"{lap['id']}  {lap['track']} / {lap['car']}  {lap['lap_time_s']:.3f}  {lap['name']}")
+                ruleset_id = f"  [{lap['ruleset_id']}]" if args.all else ""
+                print(f"{lap['id']}  {lap['track']} / {lap['car']}  {lap['lap_time_s']:.3f}  "
+                      f"{lap['name']}{ruleset_id}")
+        elif args.command == "prune-laps":
+            current = Ruleset.load(settings.ruleset_path).id
+            old = con.execute("SELECT id FROM laps WHERE ruleset_id != ?", (current,)).fetchall()
+            for lap in old:
+                _delete_lap_files(settings.data_dir, lap["id"])
+            con.execute("DELETE FROM laps WHERE ruleset_id != ?", (current,))
+            print(f"deleted {len(old)} lap(s) of rulesets other than {current}")
         elif args.command == "refresh-names":
             for u in con.execute("SELECT * FROM users WHERE steam_id NOT LIKE ?",
                                  (IMPORTED_PREFIX + "%",)).fetchall():
