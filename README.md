@@ -3,6 +3,9 @@
 Compare your Le Mans Ultimate laps against fast reference laps, and see
 corner by corner (and straight by straight) where you lose time and why.
 
+**Completely free and open source ([MIT](LICENSE)): the app and the
+leaderboard server, with all their code, are in this repository.**
+
 **LMU Lap Analyser** is a local app: pick a track and car, choose one of your
 laps and a lap to compare against (from the online leaderboard, or your own),
 and it shows where you lose time and why, with traces and a track map.
