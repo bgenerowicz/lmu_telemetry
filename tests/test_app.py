@@ -1,6 +1,7 @@
 """The library and the Dash app, against the samples."""
 
 import dataclasses
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -125,6 +126,87 @@ def test_conditions_in_one_line():
     assert _fmt_conditions({"weather": "Clear", "setup_fixed": 1}) == "Clear · fixed setup"
     assert _fmt_conditions({"setup_fixed": False}) == "open setup"
     assert _fmt_conditions({}) == ""
+
+
+def stamp(when):
+    """A local time as recordings store it: in UTC."""
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H_%M_%SZ")
+
+
+NOW = datetime(2026, 11, 4, 12, 0).astimezone()
+
+
+def test_filter_laps_by_date_uses_local_days():
+    from webapp.app import _filter_laps
+
+    rows = [{"lap": name, "session_type": "Race", "recorded_at": stamp(at)} for name, at in {
+        "just after midnight": NOW.replace(hour=0, minute=1),
+        "just before midnight": NOW.replace(hour=0, minute=0) - timedelta(minutes=1),
+        "6 days ago": NOW - timedelta(days=6),
+        "20 days ago": NOW - timedelta(days=20),
+        "40 days ago": NOW - timedelta(days=40),
+    }.items()] + [{"lap": "unknown date", "session_type": "Race", "recorded_at": None}]
+
+    def laps(period):
+        return [r["lap"] for r in _filter_laps(rows, period, "any", NOW)]
+
+    assert laps("today") == ["just after midnight"]
+    assert laps("week") == ["just after midnight", "just before midnight", "6 days ago"]
+    assert laps("month") == laps("week") + ["20 days ago"]
+    assert laps("any") == [r["lap"] for r in rows]
+
+
+def test_filter_laps_by_session():
+    from webapp.app import _filter_laps
+
+    rows = [{"lap": 1, "session_type": "Race", "recorded_at": None},
+            {"lap": 2, "session_type": "Qualify", "recorded_at": None},
+            {"lap": 3, "session_type": None, "recorded_at": None}]
+    assert [r["lap"] for r in _filter_laps(rows, "any", "Qualify", NOW)] == [2]
+    assert len(_filter_laps(rows, "any", "any", NOW)) == 3
+    assert len(_filter_laps(rows, None, None, NOW)) == 3
+
+
+def test_recording_times_are_shown_in_local_time():
+    from webapp.app import _fmt_recorded
+
+    assert _fmt_recorded(stamp(NOW)) == "2026-11-04 12:00"
+    assert _fmt_recorded(None) == ""
+    # Not the usual format: as it is, rather than nothing.
+    assert _fmt_recorded("2026-10-30T12:56") == "2026-10-30 12:56"
+
+
+def test_lap_filters_keep_the_gap_and_the_selection(tmp_path):
+    from webapp import app as webapp
+
+    now = datetime.now().astimezone()
+    recordings = [
+        {"path": "old.duckdb", "track": "T", "car": "C", "driver": "D", "session_type": "Qualify",
+         "recorded_at": stamp(now - timedelta(days=40)), "laps": [[1, 100.0], [2, 103.0]]},
+        {"path": "new.duckdb", "track": "T", "car": "C", "driver": "D", "session_type": "Race",
+         "recorded_at": stamp(now), "laps": [[1, 101.0], [2, 102.0]]},
+    ]
+    app = webapp.create_app([REFERENCES], tmp_path / "refs")
+    table = next(v["callback"] for k, v in app.callback_map.items() if "laps.page_current" in k)
+
+    everything, selected, page, note = table.__wrapped__("T", "C", recordings, "any", "any", None, None)
+    assert [r["seconds"] for r in everything] == [100.0, 101.0, 102.0, 103.0]
+    assert (selected, page, note) == ([0], 0, "")
+
+    # Your best lap isn't showing, but the gaps are still to it.
+    rows, selected, _, note = table.__wrapped__("T", "C", recordings, "today", "any", everything, [2])
+    assert [r["gap"] for r in rows] == ["+1.000", "+2.000"]
+    assert note == "Showing 2 of 4 laps."
+    # The selected lap stays selected, in its new row.
+    assert rows[selected[0]]["seconds"] == 102.0
+
+    # A selected lap that's filtered out gives way to the fastest one showing.
+    rows, selected, _, _ = table.__wrapped__("T", "C", recordings, "today", "any", everything, [0])
+    assert (rows[selected[0]]["seconds"], selected) == (101.0, [0])
+
+    rows, selected, _, note = table.__wrapped__("T", "C", recordings, "today", "Qualify", everything, [0])
+    assert (rows, selected) == ([], [])
+    assert note == "None of your 4 laps here match these filters."
 
 
 def test_active_filters():

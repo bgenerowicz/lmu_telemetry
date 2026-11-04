@@ -34,7 +34,8 @@ Status: early, but usable.
 1. **Track and car**: from your recordings and the online leaderboard.
 2. **Telemetry folder**: found through Steam if possible; otherwise
    **Browse…** to LMU's `UserData\Telemetry`. It's remembered.
-3. **Your lap**: your timed laps for that track and car, fastest first.
+3. **Your lap**: your timed laps for that track and car, fastest first. Narrow
+   them down by date (today, past week, past month) and session type.
 4. **Compare against**: a lap from the online leaderboard, your own best lap,
    or your fastest time through each section (a theoretical best lap).
 

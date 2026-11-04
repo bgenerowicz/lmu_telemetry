@@ -11,6 +11,7 @@ import os
 import secrets
 from collections import defaultdict
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -63,6 +64,9 @@ BOARD_STYLES = [
 ]
 # Laps used for "your fastest sections"; more adds little and costs time.
 MAX_SECTION_LAPS = 30
+LAPS_PER_PAGE = 12
+# The date filter on your laps, besides "today".
+PERIOD_DAYS = {"week": 7, "month": 30}
 
 
 def create_app(
@@ -243,8 +247,27 @@ def create_app(
             html.Section(className="panel two-col", children=[
                 html.Div([
                     html.Div("3. Your lap", className="step-title"),
+                    html.Div(className="filters", style={"marginBottom": 8}, children=[
+                        html.Div(className="filter", style={"width": 150}, children=[
+                            dcc.Dropdown(id="laps-period", clearable=False, searchable=False,
+                                         value="any", persistence=True, persistence_type="local",
+                                         options=[{"label": "Any date", "value": "any"},
+                                                  {"label": "Today", "value": "today"},
+                                                  {"label": "Past week", "value": "week"},
+                                                  {"label": "Past month", "value": "month"}]),
+                        ]),
+                        html.Div(className="filter", style={"width": 150}, children=[
+                            dcc.Dropdown(id="laps-session", clearable=False, searchable=False,
+                                         value="any", persistence=True, persistence_type="local",
+                                         options=[{"label": "Any session", "value": "any"},
+                                                  {"label": "Practice", "value": "Practice"},
+                                                  {"label": "Qualifying", "value": "Qualify"},
+                                                  {"label": "Race", "value": "Race"}]),
+                        ]),
+                    ]),
                     dash_table.DataTable(
-                        id="laps", row_selectable="single", selected_rows=[], page_size=12,
+                        id="laps", row_selectable="single", selected_rows=[],
+                        page_size=LAPS_PER_PAGE,
                         columns=[
                             {"name": "Time", "id": "time"},
                             {"name": "Gap", "id": "gap"},
@@ -257,7 +280,7 @@ def create_app(
                                     "textAlign": "left"},
                         style_header={"fontWeight": 600, "backgroundColor": "#f4f5f7"},
                     ),
-                    html.Div(id="laps-empty", className="muted mt"),
+                    html.Div(id="laps-note", className="muted mt"),
                 ]),
                 html.Div([
                     html.Div("4. Compare against", className="step-title"),
@@ -336,22 +359,29 @@ def create_app(
         return options, default
 
     @app.callback(
-        Output("laps", "data"), Output("laps", "selected_rows"), Output("laps-empty", "children"),
+        Output("laps", "data"), Output("laps", "selected_rows"), Output("laps", "page_current"),
+        Output("laps-note", "children"),
         Input("track", "value"), Input("car", "value"), Input("recordings", "data"),
+        Input("laps-period", "value"), Input("laps-session", "value"),
         State("laps", "data"), State("laps", "selected_rows"),
     )
-    def laps_table(track, car, recordings, old_rows, old_selected):
-        rows = _my_laps(recordings, track, car)
-        if not rows:
-            return [], [], "No laps of yours for this track and car in the telemetry folder."
-        best = rows[0]["seconds"]
-        for r in rows:
+    def laps_table(track, car, recordings, period, session, old_rows, old_selected):
+        all_rows = _my_laps(recordings, track, car)
+        if not all_rows:
+            return [], [], 0, "No laps of yours for this track and car in the telemetry folder."
+        # The gap is to your best lap overall, whatever the filters show.
+        best = all_rows[0]["seconds"]
+        for r in all_rows:
             r["gap"] = "" if r["seconds"] == best else f"+{r['seconds'] - best:.3f}"
+        rows = _filter_laps(all_rows, period, session)
+        if not rows:
+            return [], [], 0, f"None of your {len(all_rows)} laps here match these filters."
         selected = [0]
         if old_rows and old_selected:
             keep = old_rows[old_selected[0]]["id"]
             selected = [i for i, r in enumerate(rows) if r["id"] == keep] or [0]
-        return rows, selected, ""
+        note = "" if len(rows) == len(all_rows) else f"Showing {len(rows)} of {len(all_rows)} laps."
+        return rows, selected, selected[0] // LAPS_PER_PAGE, note
 
     @app.callback(
         Output("reference", "options"), Output("reference", "value"),
@@ -427,7 +457,8 @@ def create_app(
     @app.callback(
         Output("results", "children"),
         Input("laps", "selected_rows"), Input("reference", "value"),
-        State("laps", "data"), State("recordings", "data"),
+        # Filtering can put another lap in the selected row.
+        Input("laps", "data"), State("recordings", "data"),
         State("track", "value"), State("car", "value"),
     )
     def results(selected, reference, rows, recordings, track, car):
@@ -921,8 +952,39 @@ def _my_laps(recordings: list[dict], track: str | None, car: str | None) -> list
                 "seconds": seconds, "time": _fmt_time(seconds),
                 "session": f"{_fmt_recorded(r['recorded_at'])} · {r['session_type'] or ''}",
                 "driver": r["driver"] or "",
+                "recorded_at": r["recorded_at"], "session_type": r["session_type"],
             })
     return sorted(rows, key=lambda r: r["seconds"])
+
+
+def _filter_laps(rows: list[dict], period: str | None, session: str | None,
+                 now: datetime | None = None) -> list[dict]:
+    """The laps recorded in ``period`` ("today", "week", "month"; anything else is
+    any date) and of that session type ("any" or None for all)."""
+    now = now or datetime.now().astimezone()
+    return [r for r in rows
+            if (session in (None, "any") or r["session_type"] == session)
+            and _in_period(r["recorded_at"], period, now)]
+
+
+def _in_period(recorded_at: str | None, period: str | None, now: datetime) -> bool:
+    if period != "today" and period not in PERIOD_DAYS:
+        return True
+    when = _recorded_local(recorded_at)
+    if when is None:
+        return False
+    if period == "today":
+        return when.date() == now.date()
+    return now - when <= timedelta(days=PERIOD_DAYS[period])
+
+
+def _recorded_local(value: str | None) -> datetime | None:
+    """A recording's time ("2026-10-30T12_56_57Z", in UTC) in this PC's time zone."""
+    try:
+        utc = datetime.strptime(value, "%Y-%m-%dT%H_%M_%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return utc.astimezone()
 
 
 def _info_dict(info) -> dict:
@@ -971,10 +1033,11 @@ def _fmt_time(seconds: float | None) -> str:
 
 
 def _fmt_recorded(value: str | None) -> str:
-    # "2026-10-30T12_56_57Z" -> "2026-10-30 12:56"
+    # "2026-10-30T12_56_57Z" -> "2026-10-30 13:56" (local time)
     if not value:
         return ""
-    return value.replace("T", " ").replace("_", ":")[:16]
+    when = _recorded_local(value)
+    return when.strftime("%Y-%m-%d %H:%M") if when else value.replace("T", " ").replace("_", ":")[:16]
 
 def _fmt_conditions(facts: dict) -> str:
     """Weather, air and track temperature, fuel and setup in one line, e.g.
