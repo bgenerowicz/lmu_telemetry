@@ -128,6 +128,17 @@ def test_conditions_in_one_line():
     assert _fmt_conditions({}) == ""
 
 
+def test_a_finding_says_which_stretch_to_zoom_to():
+    from lmu_core.analysis import Finding
+    from lmu_core.segments import Segment
+    from webapp.app import _finding_view
+
+    seg = Segment("T1", "corner", 2556.7, 2840.2)
+    view = _finding_view(Finding(seg, "lap", "ref", 0.5, ["Brake later."]))
+    # The browser splits "<id>.n_clicks" at the first dot, so the id can't have one.
+    assert view.id == {"type": "focus", "index": "2557:2840"}
+
+
 def stamp(when):
     """A local time as recordings store it: in UTC."""
     return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H_%M_%SZ")

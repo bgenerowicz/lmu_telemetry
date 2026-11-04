@@ -767,7 +767,7 @@ def create_app(
                             Input("traces", "relayoutData"), prevent_initial_call=True)
     app.clientside_callback(ClientsideFunction("lmu", "onFocus"), Output("sync-focus", "data"),
                             Input({"type": "focus", "index": ALL}, "n_clicks"),
-                            State("segments", "data"), prevent_initial_call=True)
+                            prevent_initial_call=True)
     app.clientside_callback(ClientsideFunction("lmu", "onReset"), Output("sync-reset", "data"),
                             Input("reset-zoom", "n_clicks"), prevent_initial_call=True)
 
@@ -809,7 +809,6 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         )))
 
     children = [
-        dcc.Store(id="segments", data=[[s.start_m, s.end_m] for s in a.segments]),
         html.H2("Comparison"),
         html.P(intro, className="muted"),
         *([html.P(warning, className="note")] if warning else []),
@@ -835,7 +834,7 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
         total = sum(f.time_lost_s for f in findings)
         children.append(html.P(f"{total:.3f} s lost in total across {len(findings)} sections. "
                                "Click one to see it on the map and traces.", className="muted"))
-        children += [_finding_view(f, a.segments.index(f.segment)) for f in findings]
+        children += [_finding_view(f) for f in findings]
     else:
         children.append(html.P("Nothing significant to gain against this reference.",
                                className="note"))
@@ -850,9 +849,12 @@ def _results_view(a: SessionAnalysis, lap_id: str, ref_id: str, lap_label: str,
     return html.Div(children)
 
 
-def _finding_view(f: Finding, index: int) -> html.Div:
+def _finding_view(f: Finding) -> html.Div:
     return html.Div(
-        id={"type": "focus", "index": index}, n_clicks=0, className=f"finding {f.segment.kind}",
+        # Which stretch to zoom to when clicked (onFocus); whole metres, as a dot
+        # would end the id in the name Dash gives the click.
+        id={"type": "focus", "index": f"{f.segment.start_m:.0f}:{f.segment.end_m:.0f}"},
+        n_clicks=0, className=f"finding {f.segment.kind}",
         title="Show on the map and traces",
         children=[
             html.Div(className="head", children=[
@@ -1150,11 +1152,11 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {lmu: (functi
       return none();
     },
     // Clicking a finding zooms traces and map to that section.
-    onFocus(clicks, segments) {
+    onFocus() {
       const ctx = window.dash_clientside.callback_context;
-      if (!ctx.triggered.length || !ctx.triggered[0].value || !segments) return none();
+      if (!ctx.triggered.length || !ctx.triggered[0].value) return none();
       const id = JSON.parse(ctx.triggered[0].prop_id.split('.')[0]);
-      const [s0, s1] = segments[id.index];
+      const [s0, s1] = id.index.split(':').map(Number);
       const traces = plot('traces');
       if (traces) Plotly.relayout(traces, {'xaxis.range': [s0 - 40, s1 + 40]});
       zoomMap(s0, s1);
