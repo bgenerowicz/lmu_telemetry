@@ -45,8 +45,12 @@ server, reading the same processed lap format.
    adding those up gives the theoretical best lap.
 6. **Advise** (`analysis.py`) from per-segment metrics: braking point and
    peak pressure, entry, minimum and exit speed, full-throttle point, metres
-   off throttle. Losses on a straight that come from a slower start are blamed
-   on the exit of the corner before it.
+   off throttle, coasting (on straights and before braking), brake and throttle
+   together, and how fast the brake is released. Only differences from the
+   reference count, in sections where time is lost, as a fixed limit can blame
+   the faster lap (a fast lap can coast longest through a section). Losses on a
+   straight that come from a slower start are blamed on the exit of the corner
+   before it.
 
 `geometry.py` draws laps on a map. Driving lines come from `Path Lateral`
 (sideways offset from LMU's track reference path, + = right), placed around a

@@ -17,12 +17,27 @@ from lmu_core.segments import Segment, find_segments
 
 BRAKE_ON_PCT = 10.0
 FULL_THROTTLE_PCT = 95.0
+# Coasting: neither pedal on, and not just crawling.
+COAST_PEDAL_PCT = 5.0
+COAST_MIN_KPH = 50.0
+# A brake release runs from this share of the peak until the brake is off, for
+# zones braked at least this hard.
+RELEASE_FROM_PEAK = 0.7
+RELEASE_MIN_PEAK_PCT = 50.0
 
 # Differences smaller than these aren't worth mentioning.
 BRAKE_POINT_M = 5.0
 SPEED_KPH = 2.0
 THROTTLE_POINT_M = 10.0
 MIN_LOSS_S = 0.03
+# Chosen on real laps, against the same driver and others: above these, a lap
+# usually lost more time in that section than laps without the difference.
+# Coasting after the brakes and downshift revs showed no such link, so they
+# aren't mentioned.
+COAST_STRAIGHT_M = 30.0
+COAST_BEFORE_BRAKE_M = 20.0
+PEDAL_OVERLAP_S = 0.15
+BRAKE_RELEASE_S = 0.25
 
 
 @dataclass(frozen=True)
@@ -37,6 +52,10 @@ class SegmentStats:
     brake_peak_pct: float
     full_throttle_at_m: float | None
     part_throttle_m: float
+    coast_m: float
+    coast_before_brake_m: float | None
+    pedal_overlap_s: float
+    brake_release_s: float | None
 
 
 @dataclass(frozen=True)
@@ -119,6 +138,8 @@ def segment_stats(lap: ProcessedLap, seg: Segment) -> SegmentStats:
     imin = int(np.argmin(v))
     braking = np.flatnonzero(brake[: imin + 1] >= BRAKE_ON_PCT)
     after_apex = np.flatnonzero(throttle[imin:] >= FULL_THROTTLE_PCT)
+    coasting = (throttle < COAST_PEDAL_PCT) & (brake < COAST_PEDAL_PCT) & (v > COAST_MIN_KPH)
+    overlap = (throttle > BRAKE_ON_PCT) & (brake > BRAKE_ON_PCT)
     return SegmentStats(
         time_s=float(t[-1] - t[0]),
         entry_kph=float(v[0]),
@@ -130,7 +151,21 @@ def segment_stats(lap: ProcessedLap, seg: Segment) -> SegmentStats:
         brake_peak_pct=float(brake.max()),
         full_throttle_at_m=float(dist[imin + after_apex[0]]) if len(after_apex) else None,
         part_throttle_m=float(((throttle < FULL_THROTTLE_PCT) & (brake < BRAKE_ON_PCT)).sum() * step),
+        coast_m=float(coasting.sum() * step),
+        coast_before_brake_m=float(coasting[: braking[0]].sum() * step) if len(braking) else None,
+        pedal_overlap_s=float(np.gradient(t)[overlap].sum()),
+        brake_release_s=_brake_release_s(t, brake),
     )
+
+
+def _brake_release_s(t: np.ndarray, brake: np.ndarray) -> float | None:
+    """How long the last release took; None if not braked hard, or not released here."""
+    peak = brake.max()
+    if peak < RELEASE_MIN_PEAK_PCT:
+        return None
+    start = np.flatnonzero(brake >= RELEASE_FROM_PEAK * peak)[-1]
+    off = np.flatnonzero(brake[start:] < BRAKE_ON_PCT)
+    return float(t[start + off[0]] - t[start]) if len(off) else None
 
 
 def advise(
@@ -159,6 +194,11 @@ def advise(
                 f"{lap.part_throttle_m - ref.part_throttle_m:.0f} m more off full throttle "
                 f"without braking ({lap.part_throttle_m:.0f} m vs {ref.part_throttle_m:.0f} m)."
             )
+        if lap.coast_m - ref.coast_m >= COAST_STRAIGHT_M:
+            tips.append(
+                f"You coasted {lap.coast_m:.0f} m with neither pedal on; "
+                f"the reference {ref.coast_m:.0f} m."
+            )
         if lap.brake_at_m is not None and ref.brake_at_m is not None:
             _brake_tip(tips, lap, ref)
         if not tips:
@@ -171,6 +211,23 @@ def advise(
         tips.append(f"The reference braked at {ref.brake_at_m:.0f} m; you only lifted.")
     elif lap.brake_at_m is not None and ref.brake_at_m is not None:
         _brake_tip(tips, lap, ref)
+        if lap.coast_before_brake_m - ref.coast_before_brake_m >= COAST_BEFORE_BRAKE_M:
+            tips.append(
+                f"You coasted {lap.coast_before_brake_m:.0f} m before braking, with neither "
+                f"pedal on; the reference {ref.coast_before_brake_m:.0f} m."
+            )
+    if lap.pedal_overlap_s - ref.pedal_overlap_s >= PEDAL_OVERLAP_S:
+        tips.append(
+            f"Brake and throttle on together for {lap.pedal_overlap_s:.2f} s; "
+            f"the reference {ref.pedal_overlap_s:.2f} s."
+        )
+    if lap.brake_release_s is not None and ref.brake_release_s is not None and (
+        ref.brake_release_s - lap.brake_release_s >= BRAKE_RELEASE_S
+    ):
+        tips.append(
+            f"Ease off the brake more gradually: you let go in {lap.brake_release_s:.2f} s, "
+            f"the reference in {ref.brake_release_s:.2f} s."
+        )
 
     min_diff = lap.min_kph - ref.min_kph
     if min_diff <= -SPEED_KPH:
